@@ -4,128 +4,25 @@
  * Zero-dependency test suite for the Uno engine. Run with:
  *   node engine.test.js
  *
- * All randomness comes from a seeded rng (mulberry32) so every run is
- * identical. Where a test needs exact cards in exact places it uses the
- * engine's presetDeck hook (config._deck) or moves cards between zones
- * of a real game state, which keeps the 108-card conservation invariant
- * intact so validateState stays meaningful.
+ * The runner, seeded rng (mulberry32), and deck-stacking helpers live in
+ * testutil.js, shared with ai.test.js so the two suites cannot drift.
+ * All randomness comes from the seeded rng so every run is identical.
+ * Where a test needs exact cards in exact places it uses the engine's
+ * presetDeck hook (config._deck) or moves cards between zones of a real
+ * game state, which keeps the 108-card conservation invariant intact so
+ * validateState stays meaningful.
  */
 'use strict';
 
 var E = require('./engine.js');
+var U = require('./testutil.js');
 
-/* ----- tiny test runner ----- */
-
-var tests = [];
-function test(name, fn) { tests.push({ name: name, fn: fn }); }
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg || 'assertion failed');
-}
-function assertEqual(actual, expected, msg) {
-  if (actual !== expected) {
-    throw new Error((msg || 'assertEqual') + ': expected ' + JSON.stringify(expected) +
-      ', got ' + JSON.stringify(actual));
-  }
-}
-function assertThrows(fn, msg) {
-  var threw = false;
-  try { fn(); } catch (e) { threw = true; }
-  if (!threw) throw new Error(msg || 'expected an exception');
-}
-function assertValid(state, msg) {
-  var errors = E.validateState(state);
-  if (errors.length) {
-    throw new Error((msg || 'state invalid') + ': ' + errors.join('; '));
-  }
-}
-
-/* ----- deterministic rng (mulberry32) ----- */
-
-function seededRng(seed) {
-  var t = seed >>> 0;
-  return function () {
-    t += 0x6D2B79F5;
-    var r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/* ----- helpers ----- */
-
-function card(color, value) { return { color: color, value: value }; }
-
-function sameCard(a, b) { return a.color === b.color && a.value === b.value; }
-
-/*
- * Builds a full 108-card deck where the cards in topCards are drawn
- * first, in order (cards are drawn with pop(), so the first requested
- * card sits at the end of the array).
- */
-function stackDeck(topCards) {
-  var deck = E.buildDeck();
-  var picked = topCards.map(function (spec) {
-    var i = -1;
-    for (var k = 0; k < deck.length; k++) {
-      if (sameCard(deck[k], spec)) { i = k; break; }
-    }
-    if (i === -1) throw new Error('stackDeck: no such card left: ' + spec.color + ' ' + spec.value);
-    return deck.splice(i, 1)[0];
-  });
-  return deck.concat(picked.reverse());
-}
-
-/*
- * With numPlayers players, dealing interleaves seats: pops 0..7n-1 go to
- * seats 0,1,..,n-1 repeating, and pop 7n is the first flip. This builds
- * the topCards list for stackDeck from per-seat hands plus a flip card.
- */
-function dealOrder(hands, flip) {
-  var order = [];
-  for (var c = 0; c < 7; c++) {
-    for (var p = 0; p < hands.length; p++) order.push(hands[p][c]);
-  }
-  order.push(flip);
-  return order;
-}
-
-function makeGame(hands, flip, config) {
-  config = config || {};
-  config.numPlayers = hands.length;
-  config._deck = stackDeck(dealOrder(hands, flip));
-  return E.createGame(config, seededRng(config.seed || 1));
-}
-
-/* Seven filler cards per seat that never interact with a red-number top. */
-var FILLER = {
-  0: [card('green', '1'), card('green', '2'), card('green', '3'), card('green', '4'),
-      card('green', '6'), card('green', '7'), card('green', '8')],
-  1: [card('blue', '1'), card('blue', '2'), card('blue', '3'), card('blue', '4'),
-      card('blue', '6'), card('blue', '7'), card('blue', '8')],
-  2: [card('yellow', '1'), card('yellow', '2'), card('yellow', '3'), card('yellow', '4'),
-      card('yellow', '6'), card('yellow', '7'), card('yellow', '8')]
-};
-
-/* Moves the first drawPile card matching spec into the given hand, keeping
- * conservation intact. Used to shrink or shape hands mid-test. */
-function moveToHand(state, playerIndex, spec) {
-  for (var i = 0; i < state.drawPile.length; i++) {
-    if (sameCard(state.drawPile[i], spec)) {
-      state.players[playerIndex].hand.push(state.drawPile.splice(i, 1)[0]);
-      return;
-    }
-  }
-  throw new Error('moveToHand: card not in draw pile');
-}
-
-/* Moves all but the first `keep` cards of a hand to the bottom of the
- * draw pile (bottom = index 0, since draws pop from the end). */
-function trimHand(state, playerIndex, keep) {
-  var hand = state.players[playerIndex].hand;
-  var removed = hand.splice(keep);
-  state.drawPile = removed.concat(state.drawPile);
-}
+var test = U.test, run = U.run;
+var assert = U.assert, assertEqual = U.assertEqual;
+var assertThrows = U.assertThrows, assertValid = U.assertValid;
+var seededRng = U.seededRng, card = U.card, sameCard = U.sameCard;
+var makeGame = U.makeGame, FILLER = U.FILLER;
+var trimHand = U.trimHand, moveToHand = U.moveToHand;
 
 /* ----- deck composition ----- */
 
@@ -196,6 +93,28 @@ test('first flip is never wild4 across many seeded games', function () {
     assert(E.topDiscard(g).value !== 'wild4', 'seed ' + seed);
     assertValid(g, 'seed ' + seed);
   }
+});
+
+test('a rigged deck with only Wild Draw Fours to flip fails loudly instead of hanging', function () {
+  var deck = [];
+  for (var i = 0; i < 20; i++) deck.push(card(null, 'wild4'));
+  assertThrows(function () {
+    E.createGame({ numPlayers: 2, _deck: deck }, seededRng(1));
+  }, 'an unstartable deck must throw, not spin forever');
+});
+
+test('a degenerate rng cannot spin the first-flip reshuffle forever', function () {
+  /*
+   * A constant rng of 0.75 makes a two-card shuffle a no-op, so the
+   * honest re-flip procedure would draw the same Wild Draw Four forever;
+   * the bounded retry must fall back to pulling the other card instead.
+   */
+  var deck = [card('red', '5'), card(null, 'wild4')];
+  for (var i = 0; i < 14; i++) deck.push(card('green', String(1 + (i % 9))));
+  var g = E.createGame({ numPlayers: 2, _deck: deck }, function () { return 0.75; });
+  assert(sameCard(E.topDiscard(g), card('red', '5')), 'the non-wild4 card starts the discard');
+  assertEqual(g.drawPile.length, 1, 'the wild4 stays in the draw pile');
+  assertEqual(g.players[0].hand.length, 7);
 });
 
 test('first flip Skip makes player 0 lose the opening turn', function () {
@@ -477,8 +396,13 @@ test('catchUno records the penalty in state.unoPenalty too', function () {
   assertEqual(g3.unoPenalty.drew, 2);
 });
 
-test('a self-closed Uno window records no penalty', function () {
-  /* 2-player Reverse acts as Skip, so the pending player acts again first. */
+test('the window closing on the offender still applies the penalty', function () {
+  /*
+   * 2-player Reverse acts as Skip, so the pending player is the next to
+   * act. Their whole between-actions gap was the chance to call Uno, so
+   * acting again without calling costs the two cards like any other
+   * closing of the window.
+   */
   var hand = [card('red', 'reverse'), card('blue', '9')].concat(FILLER[0].slice(0, 5));
   var g = makeGame([hand, FILLER[1]], card('red', '5'));
   trimHand(g, 0, 2);
@@ -486,9 +410,40 @@ test('a self-closed Uno window records no penalty', function () {
   assertEqual(g2.unoPending, 0);
   assertEqual(g2.currentPlayer, 0, 'reverse acts as skip; same player again');
   var g3 = E.applyDraw(g2, seededRng(9));
-  assertEqual(g3.unoPenalty, null, 'closing your own window is not a penalty');
+  assertEqual(g3.unoPenalty.player, 0);
+  assertEqual(g3.unoPenalty.drew, 2);
   assertEqual(g3.unoPending, null);
-  assertEqual(g3.players[0].hand.length, 2, 'only the voluntary card was drawn');
+  assertEqual(g3.players[0].hand.length, 4, 'two penalty cards plus the voluntary draw');
+  assertValid(g3);
+});
+
+test('in 2-player an action card is not a free pass around the Uno rule', function () {
+  /* Playing Skip at two cards without calling, then playing out: the
+   * penalty must land before the would-be winning card. */
+  var hand = [card('red', 'skip'), card('red', '1')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand, FILLER[1]], card('red', '5'));
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g2.currentPlayer, 0, 'skip returns the turn in 2-player');
+  var g3 = E.applyPlay(g2, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g3.phase, 'playing', 'no free win: the penalty landed first');
+  assertEqual(g3.unoPenalty.player, 0);
+  assertEqual(g3.players[0].hand.length, 2);
+  assertEqual(g3.currentPlayer, 1);
+  assertValid(g3);
+});
+
+test('calling Uno between your own turns keeps the win clean', function () {
+  var hand = [card('red', 'skip'), card('red', '1')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand, FILLER[1]], card('red', '5'));
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  var g3 = E.callUno(g2, 0);
+  var g4 = E.applyPlay(g3, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g4.phase, 'roundOver');
+  assertEqual(g4.roundWinner, 0);
+  assertEqual(g4.unoPenalty, null);
+  assertValid(g4);
 });
 
 /* ----- winning and scoring ----- */
@@ -676,16 +631,4 @@ test('seeded random playouts finish with valid state at every step', function ()
 
 /* ----- run ----- */
 
-var failed = 0;
-tests.forEach(function (t) {
-  try {
-    t.fn();
-    console.log('ok    ' + t.name);
-  } catch (e) {
-    failed++;
-    console.error('FAIL  ' + t.name);
-    console.error('      ' + e.message);
-  }
-});
-console.log('\n' + (tests.length - failed) + '/' + tests.length + ' tests passed');
-if (failed > 0) process.exit(1);
+run();

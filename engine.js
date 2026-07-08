@@ -186,32 +186,31 @@
 
   /*
    * Uno enforcement. state.unoPending marks a player who reached one card
-   * without declaring; the window closes when any other player acts, at
-   * which point the two-card penalty lands automatically. The penalty is
-   * applied lazily here (at the start of the next player's action) rather
+   * without declaring; the window closes on the next action, whoever
+   * takes it, and the two-card penalty lands automatically. The penalty
+   * is applied lazily here (at the start of that next action) rather
    * than eagerly, because the offender is allowed to call Uno at any
    * moment inside the window.
    *
-   * If the pending player somehow acts again first (possible in a
-   * two-player game where Reverse acts as Skip), the window closes
-   * without penalty: no other player acted before them.
+   * The offender themself acting again first (a two-player game where a
+   * Skip, Reverse, Draw Two, or Wild Draw Four hands the turn straight
+   * back) closes the window WITH the penalty. Letting it close for free
+   * would make those cards a legal way to play out a forgotten Uno: the
+   * skipped opponent never takes an engine turn, so nothing else could
+   * ever trigger enforcement. The offender's whole between-actions gap
+   * was their chance to call.
    */
-  function enforceUnoPenalty(state, actingPlayer, rng) {
+  function enforceUnoPenalty(state, rng) {
     if (state.unoPending === null) return;
-    if (state.unoPending === actingPlayer) {
-      state.unoPending = null;
-      return;
-    }
     var offender = state.unoPending;
     var before = state.players[offender].hand.length;
     drawCards(state, offender, 2, rng);
     /*
      * The penalty is recorded on the state so the UI can narrate it as
-     * a fact. Inferring it from hand-size changes misfires: a pending
-     * player who closes their own window with a voluntary draw grows
-     * their hand by one with no penalty at all. drew is the number of
-     * cards actually taken, which can fall short of two when the piles
-     * are exhausted.
+     * a fact. Inferring it from hand-size changes misfires: a penalized
+     * player may also draw voluntarily in the same action. drew is the
+     * number of cards actually taken, which can fall short of two when
+     * the piles are exhausted.
      */
     state.unoPenalty = { player: offender, drew: state.players[offender].hand.length - before };
     state.unoPending = null;
@@ -343,54 +342,62 @@
     var first = state.drawPile.pop();
     /*
      * A Wild Draw Four may never start the discard pile: it goes back in
-     * and the draw pile is reshuffled until something else turns up.
+     * and the draw pile is reshuffled until something else turns up. The
+     * retries are bounded because the honest procedure only terminates
+     * probabilistically: a rigged preset deck with nothing but Wild Draw
+     * Fours left, or a degenerate injected rng that keeps shuffling one
+     * back on top, would spin this loop forever. A real deck reaches the
+     * fallback with odds far below one in a billion, and pulling the
+     * first other card from an already-shuffled pile is indistinguishable
+     * from one more lucky re-flip.
      */
-    while (first.value === 'wild4') {
+    var reflips = 0;
+    while (first.value === 'wild4' && reflips < 8) {
+      reflips += 1;
       state.drawPile.push(first);
       state.drawPile = shuffle(state.drawPile, rng);
       first = state.drawPile.pop();
+    }
+    if (first.value === 'wild4') {
+      state.drawPile.push(first);
+      var swap = -1;
+      for (var s = 0; s < state.drawPile.length; s++) {
+        if (state.drawPile[s].value !== 'wild4') { swap = s; break; }
+      }
+      if (swap === -1) {
+        throw new Error('cannot start a round: only Wild Draw Fours left to flip');
+      }
+      first = state.drawPile.splice(swap, 1)[0];
     }
     state.discardPile.push(first);
     state.currentColor = first.color;
 
     /*
-     * Any other action card flipped first applies its effect to the
-     * player who would have led. Nobody "played" the card, so the effects
-     * are expressed relative to seat 0 directly.
+     * An action card flipped first applies its effect to the player who
+     * would have led. Rather than re-implementing each effect here,
+     * pretend a virtual dealer in the last seat played the card: every
+     * effect in applyCardEffect is expressed relative to the player who
+     * played it, which makes seat 0 the dealer's "next player". That
+     * keeps the first-flip rules, including the stacking house rule for
+     * a flipped Draw Two, in the one place they are defined.
+     *
+     * The exception is Reverse with three or more players: official play
+     * hands the dealer the lead, but with no real dealer seat here seat 0
+     * keeps the lead and only the direction flips, so play proceeds
+     * toward the last seat. With two players the dealer trick applies as
+     * usual and the flipped Reverse acts as a Skip.
      */
-    if (first.value === 'skip') {
-      advance(state, 1);
-    } else if (first.value === 'reverse') {
-      if (state.config.numPlayers === 2) {
-        /* Reverse acts as Skip with two players, even on the first flip. */
-        advance(state, 1);
-      } else {
-        /*
-         * Official play has the dealer lead after a flipped Reverse; with
-         * no dealer seat here, player 0 keeps the lead and only the
-         * direction flips, so play proceeds toward the last seat.
-         */
-        state.direction = -1;
-      }
-    } else if (first.value === 'draw2') {
-      if (state.config.stackDraws) {
-        /*
-         * The stacking house rule applies to the opening flip too: the
-         * first player leads with the total pending and may answer with
-         * a Draw Two of their own instead of eating it, exactly as
-         * forceDraw arranges for a mid-game Draw Two.
-         */
-        state.pendingDrawCount = 2;
-        state.pendingDrawValue = 'draw2';
-      } else {
-        drawCards(state, 0, 2, rng);
-        advance(state, 1);
-      }
+    if (first.value === 'reverse' && state.config.numPlayers > 2) {
+      state.direction = -1;
+    } else {
+      state.currentPlayer = state.config.numPlayers - 1;
+      applyCardEffect(state, first, rng);
     }
     /*
      * A flipped plain Wild leaves currentColor null, which matchesTop
      * treats as "anything goes": the first player picks the color simply
-     * by playing a card.
+     * by playing a card. Through applyCardEffect it just advances the
+     * virtual dealer's turn to seat 0, like any number card.
      */
   }
 
@@ -481,16 +488,13 @@
 
     var next = clone(state);
     next.unoPenalty = null;
-    enforceUnoPenalty(next, action.playerIndex, rng);
+    enforceUnoPenalty(next, rng);
 
     var player = next.players[action.playerIndex];
     var played = player.hand.splice(action.cardIndex, 1)[0];
     next.discardPile.push(played);
     next.currentColor = isWild(played) ? action.chosenColor : played.color;
     next.pendingDraw = null;
-    if (next.config.stackDraws && next.pendingDrawCount > 0) {
-      /* The stack was answered, not resolved; the total keeps growing below. */
-    }
 
     player.calledUno = false;
     if (player.hand.length === 1) {
@@ -527,7 +531,7 @@
     var next = clone(state);
     next.unoPenalty = null;
     var pi = next.currentPlayer;
-    enforceUnoPenalty(next, pi, rng);
+    enforceUnoPenalty(next, rng);
     var player = next.players[pi];
 
     if (next.config.stackDraws && next.pendingDrawCount > 0) {

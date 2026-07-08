@@ -4,72 +4,22 @@
  * Zero-dependency tests for the CPU opponent. Run with:
  *   node ai.test.js
  *
- * The core guarantee is legality: across thousands of seeded random game
- * states, chooseAction must always return an action the engine accepts.
+ * Runner, seeded rng, and deck-stacking helpers are shared with
+ * engine.test.js via testutil.js. The core guarantee is legality: across
+ * thousands of seeded random game states, chooseAction must always
+ * return an action the engine accepts.
  */
 'use strict';
 
 var E = require('./engine.js');
 var AI = require('./ai.js');
+var U = require('./testutil.js');
 
-var tests = [];
-function test(name, fn) { tests.push({ name: name, fn: fn }); }
-
-function assert(cond, msg) {
-  if (!cond) throw new Error(msg || 'assertion failed');
-}
-function assertEqual(actual, expected, msg) {
-  if (actual !== expected) {
-    throw new Error((msg || 'assertEqual') + ': expected ' + JSON.stringify(expected) +
-      ', got ' + JSON.stringify(actual));
-  }
-}
-
-function seededRng(seed) {
-  var t = seed >>> 0;
-  return function () {
-    t += 0x6D2B79F5;
-    var r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-function card(color, value) { return { color: color, value: value }; }
-function sameCard(a, b) { return a.color === b.color && a.value === b.value; }
-
-function stackDeck(topCards) {
-  var deck = E.buildDeck();
-  var picked = topCards.map(function (spec) {
-    for (var k = 0; k < deck.length; k++) {
-      if (sameCard(deck[k], spec)) return deck.splice(k, 1)[0];
-    }
-    throw new Error('stackDeck: no such card left');
-  });
-  return deck.concat(picked.reverse());
-}
-
-function makeGame(hands, flip, config) {
-  config = config || {};
-  config.numPlayers = hands.length;
-  var order = [];
-  for (var c = 0; c < 7; c++) {
-    for (var p = 0; p < hands.length; p++) order.push(hands[p][c]);
-  }
-  order.push(flip);
-  config._deck = stackDeck(order);
-  return E.createGame(config, seededRng(1));
-}
-
-var FILLER0 = [card('green', '1'), card('green', '2'), card('green', '3'),
-               card('green', '4'), card('green', '6'), card('green', '7'), card('green', '8')];
-var FILLER1 = [card('blue', '1'), card('blue', '2'), card('blue', '3'),
-               card('blue', '4'), card('blue', '6'), card('blue', '7'), card('blue', '8')];
-
-function trimHand(state, playerIndex, keep) {
-  var removed = state.players[playerIndex].hand.splice(keep);
-  state.drawPile = removed.concat(state.drawPile);
-}
+var test = U.test, run = U.run;
+var assert = U.assert, assertEqual = U.assertEqual;
+var seededRng = U.seededRng, card = U.card;
+var makeGame = U.makeGame, trimHand = U.trimHand;
+var FILLER0 = U.FILLER[0], FILLER1 = U.FILLER[1];
 
 /* ----- strategy unit tests ----- */
 
@@ -181,16 +131,4 @@ test('never returns an illegal action across thousands of game states', function
 
 /* ----- run ----- */
 
-var failed = 0;
-tests.forEach(function (t) {
-  try {
-    t.fn();
-    console.log('ok    ' + t.name);
-  } catch (e) {
-    failed++;
-    console.error('FAIL  ' + t.name);
-    console.error('      ' + e.message);
-  }
-});
-console.log('\n' + (tests.length - failed) + '/' + tests.length + ' tests passed');
-if (failed > 0) process.exit(1);
+run();

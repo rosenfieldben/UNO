@@ -20,6 +20,8 @@ next player acts.
 - `ui.js` - the only file that touches the DOM; mutates state exclusively
   through engine functions.
 - `index.html`, `style.css` - markup and card-table styling.
+- `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
+  for the test suites.
 
 ## Tests
 
@@ -34,7 +36,9 @@ node ai.test.js
 
 - Wild Draw Four is always playable; the challenge rule is not implemented.
 - Reverse acts as Skip in a two-player game.
-- Failing to call Uno before the next player acts costs two cards.
+- Failing to call Uno before the next action costs two cards; in a
+  two-player game an action card that hands you the turn straight back
+  does not let you dodge the penalty.
 - Stacking Draw Two / Draw Four is available behind the off-by-default
   `stackDraws` config flag.
 - Scoring is standard: number cards face value, action cards 20, wilds 50,

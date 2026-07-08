@@ -49,7 +49,8 @@
      * real penalties whenever the same move re-armed the Uno window.
      */
     if (next.unoPenalty && next.unoPenalty.drew > 0) {
-      note = playerName(next.unoPenalty.player) + ' missed UNO and draws ' +
+      var offender = next.unoPenalty.player;
+      note = playerName(offender) + ' missed UNO and ' + (offender === 0 ? 'draw ' : 'draws ') +
         next.unoPenalty.drew + '! ' + (note || '');
     }
     state = next;
