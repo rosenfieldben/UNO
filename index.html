@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uno</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- New game screen -->
+<div id="setup-screen" class="screen">
+  <h1 class="title">UNO</h1>
+  <div class="setup-panel">
+    <div class="setup-row">
+      <label>Opponents</label>
+      <div class="choice-group" id="opponent-choices">
+        <button class="choice" data-count="1">1</button>
+        <button class="choice selected" data-count="2">2</button>
+        <button class="choice" data-count="3">3</button>
+      </div>
+    </div>
+    <div class="setup-row">
+      <label for="target-score">Play to</label>
+      <input id="target-score" type="number" min="50" max="2000" step="50" value="500">
+      <span class="hint">points</span>
+    </div>
+    <button id="start-button" class="big-button">Start Game</button>
+  </div>
+</div>
+
+<!-- Game screen -->
+<div id="game-screen" class="screen hidden">
+  <div id="opponents-row"></div>
+
+  <div id="table-center">
+    <div id="draw-pile" class="pile" title="Draw a card">
+      <div class="card back"><span>UNO</span></div>
+      <div id="draw-count" class="pile-count"></div>
+    </div>
+    <div id="discard-pile" class="pile"></div>
+    <div id="table-status">
+      <div id="color-indicator"></div>
+      <div id="direction-indicator"></div>
+    </div>
+  </div>
+
+  <div id="message-bar"></div>
+
+  <div id="human-area">
+    <div id="human-info">
+      <span id="human-name">You</span>
+      <span id="human-score"></span>
+    </div>
+    <div id="human-hand"></div>
+    <div id="action-bar">
+      <button id="uno-button" class="table-button hidden">UNO!</button>
+      <button id="catch-button" class="table-button hidden">Catch!</button>
+      <button id="play-drawn-button" class="table-button hidden">Play drawn card</button>
+      <button id="keep-button" class="table-button hidden">Keep it</button>
+      <button id="quit-button" class="table-button subtle">New game</button>
+    </div>
+  </div>
+</div>
+
+<!-- Wild color picker -->
+<div id="color-modal" class="overlay hidden">
+  <div class="modal">
+    <h2>Choose a color</h2>
+    <div class="color-buttons">
+      <button class="color-pick red" data-color="red"></button>
+      <button class="color-pick yellow" data-color="yellow"></button>
+      <button class="color-pick green" data-color="green"></button>
+      <button class="color-pick blue" data-color="blue"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Round / game summary -->
+<div id="summary-modal" class="overlay hidden">
+  <div class="modal">
+    <h2 id="summary-title"></h2>
+    <p id="summary-detail"></p>
+    <table id="summary-scores"></table>
+    <button id="summary-button" class="big-button"></button>
+  </div>
+</div>
+
+<script src="engine.js"></script>
+<script src="ai.js"></script>
+<script src="ui.js"></script>
+</body>
+</html>
