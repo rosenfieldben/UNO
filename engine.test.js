@@ -458,6 +458,39 @@ test('callUno is rejected when no call is pending', function () {
   assertThrows(function () { E.callUno(g, 1); });
 });
 
+test('the engine records an applied Uno penalty in state.unoPenalty', function () {
+  var g = twoCardSetup();
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g2.unoPenalty, null, 'no penalty yet, only the pending window');
+  var g3 = E.applyDraw(g2, seededRng(9));
+  assertEqual(g3.unoPenalty.player, 0);
+  assertEqual(g3.unoPenalty.drew, 2);
+  var g4 = g3.pendingDraw ? E.applyPass(g3) : E.applyDraw(g3, seededRng(10));
+  assertEqual(g4.unoPenalty, null, 'the record does not outlive its transition');
+});
+
+test('catchUno records the penalty in state.unoPenalty too', function () {
+  var g = twoCardSetup();
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  var g3 = E.catchUno(g2, seededRng(9));
+  assertEqual(g3.unoPenalty.player, 0);
+  assertEqual(g3.unoPenalty.drew, 2);
+});
+
+test('a self-closed Uno window records no penalty', function () {
+  /* 2-player Reverse acts as Skip, so the pending player acts again first. */
+  var hand = [card('red', 'reverse'), card('blue', '9')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand, FILLER[1]], card('red', '5'));
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g2.unoPending, 0);
+  assertEqual(g2.currentPlayer, 0, 'reverse acts as skip; same player again');
+  var g3 = E.applyDraw(g2, seededRng(9));
+  assertEqual(g3.unoPenalty, null, 'closing your own window is not a penalty');
+  assertEqual(g3.unoPending, null);
+  assertEqual(g3.players[0].hand.length, 2, 'only the voluntary card was drawn');
+});
+
 /* ----- winning and scoring ----- */
 
 test('emptying the hand ends the round and scores opponents\' cards', function () {
@@ -532,6 +565,56 @@ test('stackDraws lets a Draw Two be answered and the total accumulate', function
   assertValid(g4);
 });
 
+test('stackDraws: a winning final Draw Two still lands on the opponent before scoring', function () {
+  var hand0 = [card('red', 'draw2'), card('red', '2')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { stackDraws: true });
+  trimHand(g, 0, 1);
+  var before = g.players[1].hand.length;
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, declareUno: true }, seededRng(9));
+  assertEqual(g2.phase, 'roundOver');
+  assertEqual(g2.players[1].hand.length, before + 2, 'the deferred two cards land before scoring');
+  assertEqual(g2.pendingDrawCount, 0);
+  assertEqual(g2.roundPoints, E.handPoints(g2.players[1].hand), 'drawn cards count toward the score');
+  assertValid(g2);
+});
+
+test('stackDraws: winning by answering a stack makes the next player eat the whole total', function () {
+  var hand0 = [card('red', 'draw2')].concat(FILLER[0].slice(0, 6));
+  var hand1 = [card('blue', 'draw2'), card('blue', '9')].concat(FILLER[1].slice(0, 5));
+  var g = makeGame([hand0, hand1, FILLER[2]], card('red', '5'), { stackDraws: true });
+  trimHand(g, 1, 1);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  assertEqual(g2.pendingDrawCount, 2);
+  assertEqual(g2.currentPlayer, 1);
+  var g3 = E.applyPlay(g2, { type: 'play', playerIndex: 1, cardIndex: 0 }, seededRng(9));
+  assertEqual(g3.phase, 'roundOver');
+  assertEqual(g3.roundWinner, 1);
+  assertEqual(g3.players[2].hand.length, 11, 'player 2 draws the accumulated four');
+  assertEqual(g3.pendingDrawCount, 0);
+  assertValid(g3);
+});
+
+test('stackDraws: a first-flip Draw Two may be answered instead of eaten', function () {
+  var hand = [card('green', 'draw2')].concat(FILLER[0].slice(0, 6));
+  var g = makeGame([hand, FILLER[1]], card('red', 'draw2'), { stackDraws: true });
+  assertEqual(g.players[0].hand.length, 7, 'no forced draw yet');
+  assertEqual(g.currentPlayer, 0, 'the first player leads and must answer');
+  assertEqual(g.pendingDrawCount, 2);
+  assertEqual(g.pendingDrawValue, 'draw2');
+  var plays = E.legalPlays(g, 0);
+  assertEqual(plays.length, 1, 'only a Draw Two answers the stack');
+  assertEqual(plays[0].card.value, 'draw2');
+  var answered = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: plays[0].cardIndex }, seededRng(9));
+  assertEqual(answered.pendingDrawCount, 4, 'the total accumulates onto the opponent');
+  assertEqual(answered.currentPlayer, 1);
+  assertValid(answered);
+  var declined = E.applyDraw(g, seededRng(9));
+  assertEqual(declined.players[0].hand.length, 9, 'declining still eats the two');
+  assertEqual(declined.currentPlayer, 1);
+  assertEqual(declined.pendingDrawCount, 0);
+  assertValid(declined);
+});
+
 test('without stackDraws the penalty resolves immediately', function () {
   var hand0 = [card('red', 'draw2')].concat(FILLER[0].slice(0, 6));
   var hand1 = [card('blue', 'draw2')].concat(FILLER[1].slice(0, 6));
@@ -560,7 +643,12 @@ test('validateState flags lost and duplicated cards', function () {
 test('seeded random playouts finish with valid state at every step', function () {
   for (var seed = 100; seed < 130; seed++) {
     var rng = seededRng(seed);
-    var s = E.createGame({ numPlayers: 2 + (seed % 3), targetScore: 200 }, rng);
+    var s = E.createGame({
+      numPlayers: 2 + (seed % 3),
+      targetScore: 200,
+      /* Exercise the stacking mode too; its round-end resolution draws cards. */
+      stackDraws: seed % 5 === 0
+    }, rng);
     var steps = 0;
     while (s.phase !== 'gameOver' && steps < 20000) {
       steps++;

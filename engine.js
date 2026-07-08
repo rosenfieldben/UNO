@@ -202,7 +202,18 @@
       state.unoPending = null;
       return;
     }
-    drawCards(state, state.unoPending, 2, rng);
+    var offender = state.unoPending;
+    var before = state.players[offender].hand.length;
+    drawCards(state, offender, 2, rng);
+    /*
+     * The penalty is recorded on the state so the UI can narrate it as
+     * a fact. Inferring it from hand-size changes misfires: a pending
+     * player who closes their own window with a voluntary draw grows
+     * their hand by one with no penalty at all. drew is the number of
+     * cards actually taken, which can fall short of two when the piles
+     * are exhausted.
+     */
+    state.unoPenalty = { player: offender, drew: state.players[offender].hand.length - before };
     state.unoPending = null;
   }
 
@@ -256,7 +267,20 @@
     }
   }
 
-  function endRound(state) {
+  function endRound(state, rng) {
+    /*
+     * A round can end while a stacked draw total is still unresolved:
+     * under the stacking house rule the winning card (a Draw Two or
+     * Wild Draw Four, or an answer to a stack) only deferred its amount
+     * into pendingDrawCount. The official rule that makes a final Draw
+     * Two land before scoring applies to the accumulated total as well,
+     * so the player on turn, who would have answered the stack, eats it
+     * here before hands are counted. This keeps the stacking and
+     * non-stacking modes consistent on how a round may end.
+     */
+    if (state.pendingDrawCount > 0) {
+      drawCards(state, state.currentPlayer, state.pendingDrawCount, rng);
+    }
     var winner = -1;
     state.players.forEach(function (p, i) {
       if (p.hand.length === 0) winner = i;
@@ -296,6 +320,7 @@
     state.direction = 1;
     state.currentPlayer = 0;
     state.unoPending = null;
+    state.unoPenalty = null;
     state.pendingDraw = null;
     state.pendingDrawCount = 0;
     state.pendingDrawValue = null;
@@ -348,8 +373,19 @@
         state.direction = -1;
       }
     } else if (first.value === 'draw2') {
-      drawCards(state, 0, 2, rng);
-      advance(state, 1);
+      if (state.config.stackDraws) {
+        /*
+         * The stacking house rule applies to the opening flip too: the
+         * first player leads with the total pending and may answer with
+         * a Draw Two of their own instead of eating it, exactly as
+         * forceDraw arranges for a mid-game Draw Two.
+         */
+        state.pendingDrawCount = 2;
+        state.pendingDrawValue = 'draw2';
+      } else {
+        drawCards(state, 0, 2, rng);
+        advance(state, 1);
+      }
     }
     /*
      * A flipped plain Wild leaves currentColor null, which matchesTop
@@ -389,6 +425,12 @@
       drawPile: [],
       discardPile: [],
       unoPending: null,
+      /*
+       * Transient: describes the Uno penalty applied by the most recent
+       * transition, or null. Cleared at the start of every action so a
+       * state never carries a stale penalty report forward.
+       */
+      unoPenalty: null,
       pendingDraw: null,
       pendingDrawCount: 0,
       pendingDrawValue: null,
@@ -438,6 +480,7 @@
     }
 
     var next = clone(state);
+    next.unoPenalty = null;
     enforceUnoPenalty(next, action.playerIndex, rng);
 
     var player = next.players[action.playerIndex];
@@ -465,7 +508,7 @@
      * Draw Two or Wild Draw Four still makes the next player draw before
      * the round is scored, per the official rules.
      */
-    if (player.hand.length === 0) endRound(next);
+    if (player.hand.length === 0) endRound(next, rng);
     return next;
   }
 
@@ -482,6 +525,7 @@
     if (state.pendingDraw) throw new Error('already drew this turn: play the card or pass');
 
     var next = clone(state);
+    next.unoPenalty = null;
     var pi = next.currentPlayer;
     enforceUnoPenalty(next, pi, rng);
     var player = next.players[pi];
@@ -516,6 +560,7 @@
     if (state.phase !== 'playing') throw new Error('round is over');
     if (!state.pendingDraw) throw new Error('pass is only allowed after drawing a playable card');
     var next = clone(state);
+    next.unoPenalty = null;
     next.pendingDraw = null;
     advance(next, 1);
     return next;
@@ -527,6 +572,7 @@
       throw new Error('no Uno call pending for player ' + playerIndex);
     }
     var next = clone(state);
+    next.unoPenalty = null;
     next.unoPending = null;
     next.players[playerIndex].calledUno = true;
     return next;
@@ -541,7 +587,11 @@
     rng = rng || Math.random;
     if (state.unoPending === null) throw new Error('nobody forgot to call Uno');
     var next = clone(state);
-    drawCards(next, next.unoPending, 2, rng);
+    var offender = next.unoPending;
+    var before = next.players[offender].hand.length;
+    drawCards(next, offender, 2, rng);
+    /* Same penalty record as the automatic path, so the UI narrates both alike. */
+    next.unoPenalty = { player: offender, drew: next.players[offender].hand.length - before };
     next.unoPending = null;
     return next;
   }

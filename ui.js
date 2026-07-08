@@ -42,14 +42,20 @@
    * the CPU loop continue.
    */
   function commit(next, note) {
-    var pend = state ? state.unoPending : null;
-    if (pend !== null && next.unoPending === null &&
-        next.players[pend].hand.length > state.players[pend].hand.length) {
-      note = playerName(pend) + ' missed UNO and draws 2! ' + (note || '');
+    /*
+     * Uno penalties are narrated from the engine's own record rather
+     * than inferred from hand-size changes, which used to misreport a
+     * pending player's voluntary draw as a two-card penalty and missed
+     * real penalties whenever the same move re-armed the Uno window.
+     */
+    if (next.unoPenalty && next.unoPenalty.drew > 0) {
+      note = playerName(next.unoPenalty.player) + ' missed UNO and draws ' +
+        next.unoPenalty.drew + '! ' + (note || '');
     }
     state = next;
     if (state.currentPlayer !== 0 || state.players[0].hand.length !== 2) unoArmed = false;
-    if (note) setMessage(note.trim());
+    /* Always written, so a successful action clears stale error text. */
+    setMessage((note || '').trim());
     render();
     scheduleCpu();
   }
@@ -80,12 +86,15 @@
   /* ----- human actions ----- */
 
   function humanPlay(cardIndex, chosenColor) {
+    var card = state.players[0].hand[cardIndex];
+    var note = 'You play ' + (card.color || 'wild') + ' ' + label(card) +
+      (chosenColor ? ', choosing ' + chosenColor : '') + (unoArmed ? '. UNO!' : '.');
     var action = {
       type: 'play', playerIndex: 0, cardIndex: cardIndex,
       chosenColor: chosenColor, declareUno: unoArmed
     };
     try {
-      commit(E.applyPlay(state, action, rng), unoArmed ? 'UNO!' : '');
+      commit(E.applyPlay(state, action, rng), note);
     } catch (err) {
       setMessage(err.message);
     }
@@ -132,7 +141,8 @@
   function onCatchClick() {
     if (!state || state.unoPending === null || state.unoPending === 0) return;
     var caught = state.unoPending;
-    commit(E.catchUno(state, rng), 'You caught ' + playerName(caught) + ' not calling UNO! They draw 2.');
+    /* commit() narrates the penalty itself; this note adds only the who. */
+    commit(E.catchUno(state, rng), 'You caught ' + playerName(caught) + '!');
   }
 
   /* ----- rendering ----- */
