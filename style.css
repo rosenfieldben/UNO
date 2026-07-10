@@ -4,6 +4,14 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/*
+ * Rapid tapping is core to play (draw spam, Catch). Without this,
+ * Safari interprets quick double-taps as page zoom. manipulation
+ * keeps pinch-zoom available for accessibility while removing the
+ * double-tap gesture and its delay.
+ */
+button, .card, .pile { touch-action: manipulation; }
+
 :root {
   --red: #d72600;
   --yellow: #ecd407;
@@ -24,7 +32,8 @@ body {
 .hidden { display: none !important; }
 
 .screen {
-  min-height: 100vh;
+  min-height: 100vh;  /* fallback for browsers without dvh */
+  min-height: 100dvh; /* iOS: excludes the collapsing URL bar so the hand is never hidden */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -36,6 +45,17 @@ body {
   justify-content: space-between;
   max-width: 960px;
   margin: 0 auto;
+  /*
+   * Standalone PWA mode draws edge to edge. These insets keep the
+   * action bar above the home indicator and the opponents row below
+   * the status bar. env() is 0 in a normal browser tab, so this
+   * changes nothing outside home screen launches. The calc preserves
+   * the 16px baseline that .screen puts on all sides (these longhands
+   * override .screen's shorthand on this element, they do not add to
+   * it).
+   */
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
 }
 
 /* ----- setup screen ----- */
@@ -117,6 +137,7 @@ body {
   box-shadow: 0 2px 5px rgba(0,0,0,.4);
   flex-shrink: 0;
   user-select: none;
+  -webkit-touch-callout: none; /* long-press on a card must not open the iOS callout menu */
 }
 .card .value {
   font-size: 26px;
@@ -210,7 +231,16 @@ body {
 
 .pile { position: relative; }
 #draw-pile { cursor: pointer; }
-#draw-pile:hover .card { transform: translateY(-3px); }
+/*
+ * Hover lifts are gated behind hover capability because iOS Safari
+ * latches :hover on tap, leaving elements visually stuck in the
+ * lifted position after the tap (a played card kept hovering 10px
+ * up). Desktop keeps the effect. The other hover transforms below
+ * carry the same gate.
+ */
+@media (hover: hover) {
+  #draw-pile:hover .card { transform: translateY(-3px); }
+}
 .pile-count {
   position: absolute;
   bottom: -20px; left: 0; right: 0;
@@ -279,7 +309,10 @@ body {
 }
 #human-hand .card { cursor: default; opacity: .82; transition: transform .12s, opacity .12s; }
 #human-hand .card.playable { cursor: pointer; opacity: 1; }
-#human-hand .card.playable:hover { transform: translateY(-10px); }
+/* Hover-capable devices only; see the sticky-hover note at the draw pile. */
+@media (hover: hover) {
+  #human-hand .card.playable:hover { transform: translateY(-10px); }
+}
 #human-hand .card.just-drawn { outline: 3px dashed var(--yellow); outline-offset: 2px; }
 
 #action-bar {
@@ -343,7 +376,10 @@ body {
   cursor: pointer;
   transition: transform .1s;
 }
-.color-pick:hover { transform: scale(1.12); }
+/* Hover-capable devices only; see the sticky-hover note at the draw pile. */
+@media (hover: hover) {
+  .color-pick:hover { transform: scale(1.12); }
+}
 .color-pick.red { background: var(--red); }
 .color-pick.yellow { background: var(--yellow); }
 .color-pick.green { background: var(--green); }
