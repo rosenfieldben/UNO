@@ -55,7 +55,10 @@ node ai.test.js
   total raised by four and guilt judged again for the new offender. A
   successful challenge moves the whole accumulated total to the most
   recent offender; a failed one costs the challenger that total plus
-  two. No official rule covers the combination, so this is a house
+  two. An offender who played their last card ends the chain, since the
+  round is over as soon as the window resolves, exactly as a winning
+  answer to a stacked Draw Two leaves the next player no answer of their
+  own. No official rule covers the combination, so this is a house
   choice; with stacking off it reduces exactly to the official four and
   six.
 - Reverse acts as Skip in a two-player game.

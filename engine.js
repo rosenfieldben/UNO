@@ -148,8 +148,19 @@
      * with another Wild Draw Four, which the branch below already
      * expresses since it allows exactly the cards matching
      * pendingDrawValue.
+     *
+     * An offender who played their last card is the exception: the round
+     * is over the moment the window resolves, so the chain stops there.
+     * Letting it run on would leave two players holding nothing at once,
+     * and the round would go to whichever of them endRound scanned last
+     * rather than to whoever emptied their hand first. Plain stacking
+     * already truncates the same way: a winning answer leaves the next
+     * player eating the total with no answer of their own.
      */
-    if (state.pendingChallenge && !state.config.stackDraws) return [];
+    if (state.pendingChallenge) {
+      if (!state.config.stackDraws) return [];
+      if (state.players[state.pendingChallenge.offender].hand.length === 0) return [];
+    }
 
     /*
      * Stacking house rule (off by default): while a draw total is
@@ -816,6 +827,10 @@
       }
       if (pending.offender === pending.victim) {
         errors.push('pendingChallenge offender is its own victim');
+      }
+      /* The window exists precisely because the victim owes a decision. */
+      if (pending.victim !== state.currentPlayer) {
+        errors.push('pendingChallenge victim is not the player on turn');
       }
       if (pending.color !== null && COLORS.indexOf(pending.color) === -1) {
         errors.push('bad pendingChallenge color');

@@ -882,6 +882,46 @@ test('stacking: a successful challenge moves the whole total to the last offende
   assertValid(g4);
 });
 
+test('stacking: a Wild Draw Four played as a last card ends the chain', function () {
+  /*
+   * Answering it would put two players on an empty hand at once, and the
+   * round would then go to whichever of them endRound scanned last
+   * rather than to whoever emptied their hand first. Plain stacking
+   * truncates the same way, so the victim here may only challenge or
+   * accept.
+   */
+  var hand0 = [card(null, 'wild4'), card('red', '3')].concat(FILLER[0].slice(0, 5));
+  var hand1 = [card(null, 'wild4')].concat(FILLER[1].slice(0, 6));
+  var hand2 = [card(null, 'wild4')].concat(FILLER[2].slice(0, 6));
+  var g = makeGame([hand0, hand1, hand2], card('red', '5'),
+    { challengeRule: true, stackDraws: true });
+  trimHand(g, 1, 1);
+  trimHand(g, 2, 1);
+  var g2 = playWild4(g, 'green');
+  var g3 = E.applyPlay(g2,
+    { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'blue' }, seededRng(9));
+  assertEqual(g3.players[1].hand.length, 0, 'player 1 answered with their last card');
+  assertEqual(g3.phase, 'playing', 'still waiting on the window');
+  assertEqual(g3.pendingDrawCount, 8);
+  assertEqual(E.legalPlays(g3, 2).length, 0, 'the Wild Draw Four in hand cannot answer');
+  assertThrows(function () {
+    E.applyPlay(g3, { type: 'play', playerIndex: 2, cardIndex: 0, chosenColor: 'yellow' }, seededRng(9));
+  }, 'answering an offender who is already out must be rejected');
+  assertValid(g3);
+
+  var accepted = E.applyDraw(g3, seededRng(9));
+  assertEqual(accepted.phase, 'roundOver');
+  assertEqual(accepted.roundWinner, 1, 'the player who emptied their hand wins it');
+  assertEqual(accepted.players[2].hand.length, 9, 'having eaten all eight');
+  assertValid(accepted);
+
+  var failed = E.applyChallenge(g3, seededRng(9));
+  assertEqual(failed.phase, 'roundOver');
+  assertEqual(failed.roundWinner, 1);
+  assertEqual(failed.players[2].hand.length, 11, 'the eight plus two');
+  assertValid(failed);
+});
+
 test('seeded playouts with the challenge rule on stay valid at every step', function () {
   for (var seed = 300; seed < 330; seed++) {
     var rng = seededRng(seed);
