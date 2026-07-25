@@ -30,6 +30,11 @@
       <input id="target-score" type="number" inputmode="numeric" min="50" max="2000" step="50" value="500">
       <span class="hint">points</span>
     </div>
+    <div class="setup-row">
+      <label for="challenge-rule">Challenge rule</label>
+      <input id="challenge-rule" type="checkbox">
+      <span class="hint">Wild Draw Four can be challenged</span>
+    </div>
     <button id="start-button" class="big-button">Start Game</button>
   </div>
 </div>
@@ -61,6 +66,8 @@
     <div id="action-bar">
       <button id="uno-button" class="table-button hidden">UNO!</button>
       <button id="catch-button" class="table-button hidden">Catch!</button>
+      <button id="challenge-button" class="table-button hidden">Challenge!</button>
+      <button id="accept-button" class="table-button hidden">Take 4</button>
       <button id="play-drawn-button" class="table-button hidden">Play drawn card</button>
       <button id="keep-button" class="table-button hidden">Keep it</button>
       <button id="quit-button" class="table-button subtle">New game</button>
