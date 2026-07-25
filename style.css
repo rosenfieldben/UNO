@@ -108,6 +108,9 @@ body {
   text-align: center;
 }
 
+/* Big enough to be a comfortable tap target next to its label. */
+#challenge-rule { width: 20px; height: 20px; }
+
 .big-button {
   font-size: 20px;
   font-weight: bold;

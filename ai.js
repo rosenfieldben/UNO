@@ -55,6 +55,69 @@
     return rng() >= state.config.cpuForgetUnoChance;
   }
 
+  /*
+   * Whether the victim of a Wild Draw Four challenges it, as a pure
+   * function of (state, playerIndex, rng) like every other decision here.
+   *
+   * It reads only what a player at a real table can see: its own hand,
+   * the other hands' SIZES, the discard pile, and the color that was
+   * active before the wild. Reading the offender's cards would let the
+   * CPU challenge exactly when it is right, which is not something a
+   * human can play against, so the blindness is the point rather than an
+   * oversight.
+   */
+  function decideChallenge(state, playerIndex, rng) {
+    var pending = state.pendingChallenge;
+    if (!pending || pending.victim !== playerIndex) return false;
+    var offender = state.players[pending.offender];
+    /*
+     * The offender went out on it, which makes a challenge a guaranteed
+     * loss. openChallenge freezes guilt on the hand left AFTER the played
+     * card is removed, and an emptied hand cannot hold the active color,
+     * so a last-card Wild Draw Four always snapshots zero matches and is
+     * innocent by construction. Challenging it draws the total plus two
+     * instead of the total, in a round that ends either way, and those
+     * extra cards score against the challenger. Declining is strictly
+     * better in every case, so it is unconditional rather than a
+     * threshold below.
+     *
+     * Only a rigged state can make an empty hand guilty (cards moved out
+     * of it mid-window by a test helper). No legal transition reaches
+     * one: while the window is open cards can enter a hand, never leave
+     * it.
+     */
+    if (offender.hand.length === 0) return false;
+    /* No active color to dodge means the play was legal by definition. */
+    if (pending.color === null) return false;
+
+    var chance = 0.25;
+    /* A big hand is likelier to still hold the color it claimed not to. */
+    if (offender.hand.length >= 5) chance += 0.15;
+    if (offender.hand.length >= 8) chance += 0.1;
+    /*
+     * Cards of that color already face up are cards the offender cannot
+     * be holding, so the more of them, the likelier the play was honest.
+     */
+    var seen = 0;
+    state.discardPile.forEach(function (c) {
+      if (c.color === pending.color) seen += 1;
+    });
+    chance -= Math.min(seen, 8) * 0.02;
+    if (chance < 0.05) chance = 0.05;
+    return rng() < chance;
+  }
+
+  /*
+   * Whether the hand still holds the color that is currently in play,
+   * which is exactly what makes a Wild Draw Four challengeable.
+   */
+  function holdsActiveColor(state, playerIndex) {
+    if (state.currentColor === null) return false;
+    return state.players[playerIndex].hand.some(function (c) {
+      return c.color === state.currentColor;
+    });
+  }
+
   function makePlay(state, playerIndex, pick, rng) {
     var hand = state.players[playerIndex].hand;
     var action = {
@@ -99,11 +162,20 @@
     var nextOpponent = state.players[E.playerAfter(state, playerIndex, 1)];
 
     if (nextOpponent.hand.length <= 2) {
-      /* Prefer spending the cheap Draw Two before the Wild Draw Four. */
+      /*
+       * Prefer spending the cheap Draw Two before the Wild Draw Four.
+       * With the challenge rule on, a Wild Draw Four played while
+       * holding the active color can be sent straight back, and the CPU
+       * cannot see whether the victim will call it: drawing four to hand
+       * out four is a bad trade, and the card keeps its value for a turn
+       * when the play is honest. Skipping it here can never strand the
+       * CPU, since a card of the active color is a legal play by color.
+       */
+      var bluffs = state.config.challengeRule && holdsActiveColor(state, playerIndex);
       var punish = null;
       plays.forEach(function (p) {
         if (p.card.value === 'draw2' && (!punish || punish.card.value !== 'draw2')) punish = p;
-        if (p.card.value === 'wild4' && !punish) punish = p;
+        if (p.card.value === 'wild4' && !punish && !bluffs) punish = p;
       });
       if (punish) return makePlay(state, playerIndex, punish, rng);
     }
@@ -137,6 +209,7 @@
 
   return {
     chooseAction: chooseAction,
+    decideChallenge: decideChallenge,
     bestColor: bestColor
   };
 });

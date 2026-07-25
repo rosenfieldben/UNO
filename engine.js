@@ -108,10 +108,12 @@
 
   /*
    * A play is legal if it matches the top discard by color, number, or
-   * symbol, or is a Wild. Wild Draw Four is treated as always playable;
-   * the official challenge rule (playing it only with no color match, and
-   * the next player being allowed to challenge) is deliberately not
-   * implemented, matching most casual play.
+   * symbol, or is a Wild. Wild Draw Four stays always playable here even
+   * under the challenge rule: the official rule bars playing it while
+   * holding the active color, but it polices that after the fact through
+   * the challenge (see openChallenge and applyChallenge) rather than by
+   * hiding the card. With config.challengeRule off nobody can call the
+   * bluff and it simply goes unpunished, matching most casual play.
    *
    * Color matching is checked against state.currentColor rather than the
    * printed color of the top card, because after a Wild the declared
@@ -137,6 +139,27 @@
     if (state.pendingDraw) {
       var idx = state.pendingDraw.cardIndex;
       return [{ cardIndex: idx, card: hand[idx] }];
+    }
+
+    /*
+     * A challenge window freezes the hand: the victim owes a decision
+     * (applyChallenge, or applyDraw to accept) before anything else can
+     * happen. The stacking house rule adds a third option, answering
+     * with another Wild Draw Four, which the branch below already
+     * expresses since it allows exactly the cards matching
+     * pendingDrawValue.
+     *
+     * An offender who played their last card is the exception: the round
+     * is over the moment the window resolves, so the chain stops there.
+     * Letting it run on would leave two players holding nothing at once,
+     * and the round would go to whichever of them endRound scanned last
+     * rather than to whoever emptied their hand first. Plain stacking
+     * already truncates the same way: a winning answer leaves the next
+     * player eating the total with no answer of their own.
+     */
+    if (state.pendingChallenge) {
+      if (!state.config.stackDraws) return [];
+      if (state.players[state.pendingChallenge.offender].hand.length === 0) return [];
     }
 
     /*
@@ -220,8 +243,14 @@
    * Applies the consequence of an action card just played. The player who
    * played it is still state.currentPlayer, so "next player" is one seat
    * ahead and advancing two seats implements "loses their turn".
+   *
+   * priorColor is the color that was active when the card was played,
+   * which is the only thing the challenge rule judges a Wild Draw Four
+   * against. Only applyPlay can reach that case with the flag on, so
+   * startRound's virtual-dealer call has none to supply: a Wild Draw Four
+   * can never be the first flip.
    */
-  function applyCardEffect(state, card, rng) {
+  function applyCardEffect(state, card, rng, priorColor) {
     switch (card.value) {
       case 'skip':
         advance(state, 2);
@@ -243,7 +272,11 @@
         forceDraw(state, 2, 'draw2', rng);
         break;
       case 'wild4':
-        forceDraw(state, 4, 'wild4', rng);
+        if (state.config.challengeRule) {
+          openChallenge(state, priorColor);
+        } else {
+          forceDraw(state, 4, 'wild4', rng);
+        }
         break;
       default:
         advance(state, 1);
@@ -264,6 +297,51 @@
       drawCards(state, playerAfter(state, state.currentPlayer, 1), amount, rng);
       advance(state, 2);
     }
+  }
+
+  /*
+   * Challenge rule: a Wild Draw Four defers instead of dealing out its
+   * four cards. The victim takes the turn owing a decision, and the
+   * amount rides in pendingDrawCount exactly as a stacked total does, so
+   * accepting can reuse the same eat-the-total branch in applyDraw.
+   *
+   * Guilt is frozen here, at the moment of play, and is never recomputed
+   * later. By the time the victim decides, the offender's hand may have
+   * changed (a lazy Uno penalty landing, or an earlier challenge handing
+   * cards back), and the rule judges the hand as it was when the card
+   * hit the table.
+   */
+  function openChallenge(state, priorColor) {
+    var offender = state.currentPlayer;
+    var matches = 0;
+    /*
+     * The played card is already out of the hand, so it cannot count
+     * against its own player. The null guard is not cosmetic: wilds
+     * carry a null color, so without it a round that opened on a flipped
+     * Wild (no active color, and therefore nothing to dodge) would count
+     * every wild in hand as a match.
+     */
+    if (priorColor !== null) {
+      state.players[offender].hand.forEach(function (c) {
+        if (c.color === priorColor) matches += 1;
+      });
+    }
+    state.pendingDrawCount += 4;
+    state.pendingDrawValue = 'wild4';
+    state.pendingChallenge = {
+      offender: offender,
+      victim: playerAfter(state, offender, 1),
+      color: priorColor,
+      /*
+       * hadColorMatch is the bit the rule turns on; colorMatches rides
+       * along so the UI can state the honest basis of a successful
+       * challenge instead of asking the player to take its word for it.
+       */
+      colorMatches: matches,
+      hadColorMatch: matches > 0,
+      amount: state.pendingDrawCount
+    };
+    advance(state, 1);
   }
 
   function endRound(state, rng) {
@@ -299,12 +377,32 @@
     state.pendingDraw = null;
     state.pendingDrawCount = 0;
     state.pendingDrawValue = null;
+    state.pendingChallenge = null;
+    /*
+     * challengeResult is deliberately left standing: it reports what the
+     * transition that ended the round just did, and a failed challenge
+     * can be exactly that transition. unoPenalty survives endRound for
+     * the same reason. The next action clears both.
+     */
     if (state.players[winner].score >= state.config.targetScore) {
       state.phase = 'gameOver';
       state.gameWinner = winner;
     } else {
       state.phase = 'roundOver';
     }
+  }
+
+  /*
+   * Ends the round if the last transition left someone holding nothing.
+   * Under the challenge rule the win check cannot live in applyPlay
+   * alone: a Wild Draw Four played as a last card leaves the round
+   * hanging until the victim decides, and a successful challenge hands
+   * the cards back, so there is no winner after all.
+   */
+  function endRoundIfOut(state, rng) {
+    var out = false;
+    state.players.forEach(function (p) { if (p.hand.length === 0) out = true; });
+    if (out) endRound(state, rng);
   }
 
   /*
@@ -323,6 +421,8 @@
     state.pendingDraw = null;
     state.pendingDrawCount = 0;
     state.pendingDrawValue = null;
+    state.pendingChallenge = null;
+    state.challengeResult = null;
     state.roundWinner = null;
     state.roundPoints = 0;
     state.gameWinner = null;
@@ -417,6 +517,13 @@
          */
         stackDraws: !!config.stackDraws,
         /*
+         * House rule, off by default: the official Wild Draw Four
+         * challenge. The player who would draw may challenge the play
+         * instead, and whoever turns out to be wrong takes the cards
+         * (see openChallenge and applyChallenge).
+         */
+        challengeRule: !!config.challengeRule,
+        /*
          * Consumed by the AI layer when deciding whether to declare Uno;
          * kept in config so one object describes the whole game and the
          * human gets a chance to catch forgetful CPUs.
@@ -441,6 +548,16 @@
       pendingDraw: null,
       pendingDrawCount: 0,
       pendingDrawValue: null,
+      /*
+       * Set while a Wild Draw Four waits on its victim's decision, and
+       * carries the guilt snapshot taken when the card was played.
+       */
+      pendingChallenge: null,
+      /*
+       * Transient, like unoPenalty: describes the challenge the most
+       * recent transition resolved, or null.
+       */
+      challengeResult: null,
       roundWinner: null,
       roundPoints: 0,
       gameWinner: null
@@ -488,6 +605,7 @@
 
     var next = clone(state);
     next.unoPenalty = null;
+    next.challengeResult = null;
     enforceUnoPenalty(next, rng);
 
     var player = next.players[action.playerIndex];
@@ -505,14 +623,22 @@
       }
     }
 
-    applyCardEffect(next, played, rng);
+    /*
+     * state is the untouched input, so state.currentColor is still the
+     * color this card had to beat: exactly what the challenge rule
+     * judges a Wild Draw Four against.
+     */
+    applyCardEffect(next, played, rng, state.currentColor);
 
     /*
      * The win check happens after the card effect on purpose: a final
      * Draw Two or Wild Draw Four still makes the next player draw before
-     * the round is scored, per the official rules.
+     * the round is scored, per the official rules. Under the challenge
+     * rule those four cards are not dealt yet and the win is not final
+     * either, so the check waits for whichever transition closes the
+     * window (see endRoundIfOut).
      */
-    if (player.hand.length === 0) endRound(next, rng);
+    if (player.hand.length === 0 && !next.pendingChallenge) endRound(next, rng);
     return next;
   }
 
@@ -530,16 +656,25 @@
 
     var next = clone(state);
     next.unoPenalty = null;
+    next.challengeResult = null;
     var pi = next.currentPlayer;
     enforceUnoPenalty(next, rng);
     var player = next.players[pi];
 
-    if (next.config.stackDraws && next.pendingDrawCount > 0) {
-      /* Declining (or being unable) to stack means eating the whole total. */
+    if (next.pendingChallenge || (next.config.stackDraws && next.pendingDrawCount > 0)) {
+      /*
+       * Declining (or being unable) to stack means eating the whole
+       * total, and so does accepting a Wild Draw Four rather than
+       * challenging it. One branch, because the outcome is the same:
+       * take everything pending and lose the turn.
+       */
       drawCards(next, pi, next.pendingDrawCount, rng);
       next.pendingDrawCount = 0;
       next.pendingDrawValue = null;
+      next.pendingChallenge = null;
       advance(next, 1);
+      /* Only a challenge window can leave a played-out hand waiting. */
+      if (state.pendingChallenge) endRoundIfOut(next, rng);
       return next;
     }
 
@@ -565,8 +700,64 @@
     if (!state.pendingDraw) throw new Error('pass is only allowed after drawing a playable card');
     var next = clone(state);
     next.unoPenalty = null;
+    next.challengeResult = null;
     next.pendingDraw = null;
     advance(next, 1);
+    return next;
+  }
+
+  /*
+   * The victim of a Wild Draw Four challenges it instead of drawing.
+   * Guilt was decided when the card was played (see openChallenge), so
+   * all that is left here is the payout: a guilty offender takes the
+   * cards and the victim keeps the turn they never really lost, while an
+   * innocent one costs the challenger two cards on top of the total plus
+   * their turn.
+   */
+  function applyChallenge(state, rng) {
+    rng = rng || Math.random;
+    if (state.phase !== 'playing') throw new Error('round is over');
+    if (!state.pendingChallenge) throw new Error('no Wild Draw Four to challenge');
+
+    var next = clone(state);
+    next.unoPenalty = null;
+    next.challengeResult = null;
+    /*
+     * The decision is an action like any other, so it closes an open Uno
+     * window with the usual penalty before anything else happens.
+     */
+    enforceUnoPenalty(next, rng);
+
+    var pending = next.pendingChallenge;
+    var guilty = pending.hadColorMatch;
+    var target = guilty ? pending.offender : pending.victim;
+    var amount = guilty ? next.pendingDrawCount : next.pendingDrawCount + 2;
+    var before = next.players[target].hand.length;
+    drawCards(next, target, amount, rng);
+    /*
+     * Reported as a fact for the UI to narrate, exactly like unoPenalty:
+     * only the engine holds the snapshot the verdict came from, and drew
+     * can fall short of amount when both piles run dry.
+     */
+    next.challengeResult = {
+      challenger: pending.victim,
+      offender: pending.offender,
+      guilty: guilty,
+      color: pending.color,
+      colorMatches: pending.colorMatches,
+      drew: next.players[target].hand.length - before
+    };
+    next.pendingChallenge = null;
+    next.pendingDrawCount = 0;
+    next.pendingDrawValue = null;
+    /*
+     * A guilty verdict leaves the discard pile and the declared color
+     * alone: the card was legally on the table, it just failed to stick
+     * to the victim. The victim is already on turn, so only a failed
+     * challenge advances past them.
+     */
+    if (!guilty) advance(next, 1);
+    endRoundIfOut(next, rng);
     return next;
   }
 
@@ -577,6 +768,7 @@
     }
     var next = clone(state);
     next.unoPenalty = null;
+    next.challengeResult = null;
     next.unoPending = null;
     next.players[playerIndex].calledUno = true;
     return next;
@@ -591,6 +783,7 @@
     rng = rng || Math.random;
     if (state.unoPending === null) throw new Error('nobody forgot to call Uno');
     var next = clone(state);
+    next.challengeResult = null;
     var offender = next.unoPending;
     var before = next.players[offender].hand.length;
     drawCards(next, offender, 2, rng);
@@ -622,6 +815,37 @@
     }
     if (state.unoPending !== null && (state.unoPending < 0 || state.unoPending >= n)) {
       errors.push('unoPending out of range');
+    }
+    if (state.pendingChallenge) {
+      var pending = state.pendingChallenge;
+      if (state.phase !== 'playing') errors.push('pendingChallenge outside a live round');
+      if (pending.offender < 0 || pending.offender >= n) {
+        errors.push('pendingChallenge offender out of range');
+      }
+      if (pending.victim < 0 || pending.victim >= n) {
+        errors.push('pendingChallenge victim out of range');
+      }
+      if (pending.offender === pending.victim) {
+        errors.push('pendingChallenge offender is its own victim');
+      }
+      /* The window exists precisely because the victim owes a decision. */
+      if (pending.victim !== state.currentPlayer) {
+        errors.push('pendingChallenge victim is not the player on turn');
+      }
+      if (pending.color !== null && COLORS.indexOf(pending.color) === -1) {
+        errors.push('bad pendingChallenge color');
+      }
+      if (typeof pending.hadColorMatch !== 'boolean') {
+        errors.push('pendingChallenge guilt is not a boolean');
+      }
+      if (pending.hadColorMatch !== (pending.colorMatches > 0)) {
+        errors.push('pendingChallenge guilt disagrees with its own count');
+      }
+      /* The window owns the whole pending total, so the two must agree. */
+      if (!(pending.amount > 0) || pending.amount !== state.pendingDrawCount) {
+        errors.push('pendingChallenge amount out of step with pendingDrawCount');
+      }
+      if (state.pendingDraw !== null) errors.push('pendingDraw during a challenge window');
     }
 
     var tally = {};
@@ -661,6 +885,7 @@
     applyPlay: applyPlay,
     applyDraw: applyDraw,
     applyPass: applyPass,
+    applyChallenge: applyChallenge,
     callUno: callUno,
     catchUno: catchUno,
     validateState: validateState

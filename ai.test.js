@@ -92,6 +92,98 @@ test('is deterministic for a given state and seed', function () {
   assertEqual(JSON.stringify(a), JSON.stringify(b));
 });
 
+/* ----- Wild Draw Four challenge decisions ----- */
+
+/*
+ * Player 0 plays a Wild Draw Four on a red 5 and declares green, so
+ * player 1 is the victim owing a decision. rest0 is what player 0 keeps,
+ * which is what the challenge rule judges the play against.
+ */
+function openWindow(rest0, config) {
+  config = config || {};
+  config.challengeRule = true;
+  var g = makeGame([[card(null, 'wild4')].concat(rest0), FILLER1], card('red', '5'), config);
+  return E.applyPlay(g,
+    { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'green' }, seededRng(9));
+}
+
+test('decideChallenge is deterministic for a given state and seed', function () {
+  var g = openWindow(FILLER0.slice(0, 6));
+  for (var seed = 1; seed <= 12; seed++) {
+    var a = AI.decideChallenge(g, 1, seededRng(seed));
+    var b = AI.decideChallenge(g, 1, seededRng(seed));
+    assertEqual(a, b, 'seed ' + seed + ' must decide the same way twice');
+  }
+  /* And it is the injected rng that decides, nothing hidden. */
+  assertEqual(AI.decideChallenge(g, 1, function () { return 0; }), true);
+  assertEqual(AI.decideChallenge(g, 1, function () { return 0.99; }), false);
+});
+
+test('decideChallenge never challenges a legally played last-card Wild Draw Four', function () {
+  var g = makeGame([[card(null, 'wild4')].concat(FILLER0.slice(0, 6)), FILLER1],
+    card('red', '5'), { challengeRule: true });
+  trimHand(g, 0, 1);
+  var g2 = E.applyPlay(g,
+    { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'green' }, seededRng(9));
+  assertEqual(g2.players[0].hand.length, 0, 'the offender is out, pending the decision');
+  assertEqual(g2.pendingChallenge.hadColorMatch, false,
+    'an emptied hand holds no color, so the play is innocent by construction');
+  /*
+   * The challenge is therefore a guaranteed loss, paying the total plus
+   * two into a round that ends either way. Declining cannot be left to
+   * the rng: even a draw that always fires must still decline.
+   */
+  assertEqual(AI.decideChallenge(g2, 1, function () { return 0; }), false);
+  assertEqual(AI.decideChallenge(g2, 1, seededRng(3)), false);
+});
+
+test('decideChallenge is safe to call on any state', function () {
+  var g = openWindow(FILLER0.slice(0, 6));
+  /* Calling for every seat, victim or not, must never throw. */
+  for (var i = 0; i < g.config.numPlayers; i++) {
+    AI.decideChallenge(g, i, seededRng(i + 1));
+  }
+  assertEqual(AI.decideChallenge(g, 0, seededRng(1)), false, 'only the victim decides');
+  var fresh = makeGame([FILLER0, FILLER1], card('red', '5'), { challengeRule: true });
+  assertEqual(AI.decideChallenge(fresh, 0, seededRng(1)), false, 'no window, no challenge');
+  assertEqual(AI.decideChallenge(fresh, 1, seededRng(1)), false);
+});
+
+test('plays out full games with the challenge rule on, legally at every step', function () {
+  for (var seed = 1; seed <= 20; seed++) {
+    var rng = seededRng(seed);
+    var s = E.createGame({
+      numPlayers: 2 + (seed % 3),
+      targetScore: 200,
+      challengeRule: true,
+      stackDraws: seed % 2 === 0
+    }, rng);
+    var steps = 0;
+    while (s.phase !== 'gameOver' && steps < 20000) {
+      steps++;
+      if (s.phase === 'roundOver') { s = E.startNextRound(s, rng); continue; }
+      if (s.pendingChallenge && AI.decideChallenge(s, s.currentPlayer, rng)) {
+        s = E.applyChallenge(s, rng);
+      } else {
+        var action = AI.chooseAction(s, s.currentPlayer, rng);
+        if (action.type === 'play') {
+          var legal = E.legalPlays(s, s.currentPlayer).some(function (p) {
+            return p.cardIndex === action.cardIndex;
+          });
+          assert(legal, 'seed ' + seed + ' step ' + steps + ': illegal card index');
+          s = E.applyPlay(s, action, rng);
+        } else {
+          assertEqual(action.type, 'draw', 'seed ' + seed + ': unknown action type');
+          s = E.applyDraw(s, rng);
+        }
+      }
+      var errors = E.validateState(s);
+      assert(errors.length === 0, 'seed ' + seed + ' step ' + steps + ': ' + errors.join('; '));
+    }
+    assertEqual(s.phase, 'gameOver', 'seed ' + seed + ' must reach game over');
+  }
+});
+
 /* ----- legality soak: thousands of seeded random states ----- */
 
 test('never returns an illegal action across thousands of game states', function () {
