@@ -119,19 +119,22 @@ test('decideChallenge is deterministic for a given state and seed', function () 
   assertEqual(AI.decideChallenge(g, 1, function () { return 0.99; }), false);
 });
 
-test('decideChallenge always challenges a Wild Draw Four played as a last card', function () {
+test('decideChallenge never challenges a legally played last-card Wild Draw Four', function () {
   var g = makeGame([[card(null, 'wild4')].concat(FILLER0.slice(0, 6)), FILLER1],
     card('red', '5'), { challengeRule: true });
   trimHand(g, 0, 1);
   var g2 = E.applyPlay(g,
     { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'green' }, seededRng(9));
   assertEqual(g2.players[0].hand.length, 0, 'the offender is out, pending the decision');
+  assertEqual(g2.pendingChallenge.hadColorMatch, false,
+    'an emptied hand holds no color, so the play is innocent by construction');
   /*
-   * Accepting hands over the round, so this one cannot be left to the
-   * rng: even a draw that always declines must still challenge.
+   * The challenge is therefore a guaranteed loss, paying the total plus
+   * two into a round that ends either way. Declining cannot be left to
+   * the rng: even a draw that always fires must still decline.
    */
-  assertEqual(AI.decideChallenge(g2, 1, function () { return 0.999; }), true);
-  assertEqual(AI.decideChallenge(g2, 1, seededRng(3)), true);
+  assertEqual(AI.decideChallenge(g2, 1, function () { return 0; }), false);
+  assertEqual(AI.decideChallenge(g2, 1, seededRng(3)), false);
 });
 
 test('decideChallenge is safe to call on any state', function () {

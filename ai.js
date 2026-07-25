@@ -71,11 +71,22 @@
     if (!pending || pending.victim !== playerIndex) return false;
     var offender = state.players[pending.offender];
     /*
-     * The offender went out on it: accepting hands them the round, so
-     * two extra cards are cheap insurance against the chance of taking
-     * the win back.
+     * The offender went out on it, which makes a challenge a guaranteed
+     * loss. openChallenge freezes guilt on the hand left AFTER the played
+     * card is removed, and an emptied hand cannot hold the active color,
+     * so a last-card Wild Draw Four always snapshots zero matches and is
+     * innocent by construction. Challenging it draws the total plus two
+     * instead of the total, in a round that ends either way, and those
+     * extra cards score against the challenger. Declining is strictly
+     * better in every case, so it is unconditional rather than a
+     * threshold below.
+     *
+     * Only a rigged state can make an empty hand guilty (cards moved out
+     * of it mid-window by a test helper). No legal transition reaches
+     * one: while the window is open cards can enter a hand, never leave
+     * it.
      */
-    if (offender.hand.length === 0) return true;
+    if (offender.hand.length === 0) return false;
     /* No active color to dodge means the play was legal by definition. */
     if (pending.color === null) return false;
 
