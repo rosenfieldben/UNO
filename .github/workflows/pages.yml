@@ -28,8 +28,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: node engine.test.js
-      - run: node ai.test.js
+      - run: node --test
 
   deploy:
     needs: test

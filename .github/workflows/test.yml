@@ -1,4 +1,4 @@
-# Runs both test suites on every pull request, so a broken change shows
+# Runs every test suite on every pull request, so a broken change shows
 # up in review instead of after it merges. pages.yml runs them again on
 # main before it deploys.
 #
@@ -11,7 +11,9 @@
 # asks for neither.
 #
 # The steps mirror the test job in pages.yml on purpose, so a green PR
-# predicts a green deploy. A new test suite has to be added to both.
+# predicts a green deploy. Both run node --test, which finds every
+# *.test.js file by its name, so a new suite needs no edit to either
+# workflow and the two lists cannot drift apart.
 name: Tests
 
 # pull_request, not pull_request_target: a run for a PR from a fork gets
@@ -36,7 +38,7 @@ jobs:
     # job is also called "test", so this one gets a name of its own.
     name: PR tests
     runs-on: ubuntu-latest
-    # Both suites finish in seconds. Without a cap, a test stuck in a loop
+    # The suites finish in seconds. Without a cap, a test stuck in a loop
     # would hold the PR's check open for the six-hour default.
     timeout-minutes: 10
     steps:
@@ -44,5 +46,4 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-      - run: node engine.test.js
-      - run: node ai.test.js
+      - run: node --test
