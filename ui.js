@@ -4,14 +4,18 @@
  * The only layer allowed to touch the DOM. It holds the current game
  * state and mutates it exclusively through engine functions (plus the
  * AI's chooseAction for CPU seats), then re-renders everything from the
- * state, so the screen can never drift from the rules.
+ * state, so the screen can never drift from the rules. Every state it
+ * adopts is also handed to save.js, so a reload resumes the game.
  */
 (function () {
   'use strict';
 
   var E = window.UnoEngine;
   var AI = window.UnoAI;
+  var S = window.UnoSave;
   var rng = Math.random;
+  /* null when storage is missing or blocked; save.js then does nothing. */
+  var storage = S.storageFrom(window);
 
   /* Long enough to follow CPU turns and to click Catch on a forgetful CPU. */
   var CPU_DELAY = 1000;
@@ -58,8 +62,8 @@
 
   /*
    * Every change funnels through here: adopt the new state, narrate any
-   * automatic Uno penalty the transition caused, then re-render and let
-   * the CPU loop continue.
+   * automatic Uno penalty the transition caused, save it, then re-render
+   * and let the CPU loop continue.
    */
   function commit(next, note) {
     /*
@@ -86,6 +90,11 @@
       note = (note || '') + ' Challenge it, or take ' + next.pendingChallenge.amount + '?';
     }
     state = next;
+    /*
+     * Saved on every transition, CPU moves included, so a reload never
+     * rewinds the game. A finished game clears the save instead.
+     */
+    S.persist(storage, state);
     if (state.currentPlayer !== 0 || state.players[0].hand.length !== 2) unoArmed = false;
     /* Always written, so a successful action clears stale error text. */
     setMessage((note || '').trim());
@@ -386,6 +395,11 @@
   function backToSetup() {
     clearTimeout(cpuTimer);
     state = null;
+    /*
+     * Both ways here end the game for good, New game and Play again, so a
+     * reload must not bring it back.
+     */
+    S.clear(storage);
     $('game-screen').classList.add('hidden');
     $('summary-modal').classList.add('hidden');
     $('color-modal').classList.add('hidden');
@@ -406,8 +420,36 @@
       targetScore: target,
       challengeRule: $('challenge-rule').checked
     }, rng);
+    /* The one new state that does not come through commit(). */
+    S.persist(storage, state);
     unoArmed = false;
     setMessage(state.currentPlayer === 0 ? 'Your move.' : playerName(state.currentPlayer) + ' starts.');
+    render();
+    scheduleCpu();
+  }
+
+  /*
+   * Picks up a saved game where it stopped. A save that is missing, from
+   * another version, or fails validation loads as null, and the setup
+   * screen shows as if nothing had been saved. The UI-only state starts
+   * fresh: an armed Uno call or a half-chosen Wild color is not part of
+   * the save. Narration attached to the saved state (unoPenalty,
+   * challengeResult) is not replayed, since it describes a move the
+   * player already saw.
+   */
+  function resumeSavedGame() {
+    var saved = S.load(storage);
+    if (!saved) return;
+    state = saved;
+    unoArmed = false;
+    pendingWildIndex = null;
+    $('setup-screen').classList.add('hidden');
+    $('game-screen').classList.remove('hidden');
+    var turn = '';
+    if (state.phase === 'playing') {
+      turn = state.currentPlayer === 0 ? ' Your move.' : ' ' + playerName(state.currentPlayer) + ' to play.';
+    }
+    setMessage('Welcome back.' + turn);
     render();
     scheduleCpu();
   }
@@ -452,4 +494,6 @@
       }
     });
   });
+
+  resumeSavedGame();
 })();
