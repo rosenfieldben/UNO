@@ -140,6 +140,20 @@ function trimHand(state, playerIndex, keep) {
   state.drawPile = removed.concat(state.drawPile);
 }
 
+/*
+ * A working in-memory stand-in for localStorage, shared by the save and
+ * wiring suites so both exercise save.js against the same fake.
+ */
+function memoryStorage() {
+  var items = {};
+  return {
+    items: items,
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(items, k) ? items[k] : null; },
+    setItem: function (k, v) { items[k] = String(v); },
+    removeItem: function (k) { delete items[k]; }
+  };
+}
+
 module.exports = {
   test: test,
   run: run,
@@ -155,5 +169,6 @@ module.exports = {
   makeGame: makeGame,
   FILLER: FILLER,
   moveToHand: moveToHand,
-  trimHand: trimHand
+  trimHand: trimHand,
+  memoryStorage: memoryStorage
 };

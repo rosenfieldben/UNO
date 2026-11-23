@@ -20,20 +20,9 @@ var U = require('./testutil.js');
 
 var test = U.test, run = U.run;
 var assert = U.assert, assertEqual = U.assertEqual;
-var seededRng = U.seededRng;
+var seededRng = U.seededRng, memoryStorage = U.memoryStorage;
 
 /* ----- helpers ----- */
-
-/* A working in-memory stand-in for localStorage. */
-function memoryStorage() {
-  var items = {};
-  return {
-    items: items,
-    getItem: function (k) { return Object.prototype.hasOwnProperty.call(items, k) ? items[k] : null; },
-    setItem: function (k, v) { items[k] = String(v); },
-    removeItem: function (k) { delete items[k]; }
-  };
-}
 
 /* Storage where every call throws, as when the browser blocks it. */
 function throwingStorage() {

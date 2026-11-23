@@ -62,9 +62,22 @@
   /* ----- state transitions ----- */
 
   /*
-   * Every change funnels through here: adopt the new state, narrate any
-   * automatic Uno penalty the transition caused, save it, then re-render
-   * and let the CPU loop continue.
+   * The only place the game state is replaced, and it saves in the same
+   * step: null clears the save, and so does a finished game (see
+   * persist in save.js). Keeping the two together means no path can take
+   * on a state without saving it, or leave the screen and the save
+   * disagreeing. Saving every state, CPU moves included, is what lets a
+   * reload resume the latest move rather than an older one.
+   */
+  function adopt(next) {
+    state = next;
+    S.persist(storage, next);
+  }
+
+  /*
+   * Every move funnels through here: narrate any automatic Uno penalty
+   * the transition caused, adopt the new state, then re-render and let
+   * the CPU loop continue.
    */
   function commit(next, note) {
     /*
@@ -90,13 +103,7 @@
     if (next.pendingChallenge && next.pendingChallenge.victim === 0) {
       note = (note || '') + ' Challenge it, or take ' + next.pendingChallenge.amount + '?';
     }
-    state = next;
-    /*
-     * Saved on every transition, CPU moves included, so a reload resumes
-     * the latest move rather than an older one. A finished game clears
-     * the save instead.
-     */
-    S.persist(storage, state);
+    adopt(next);
     if (state.currentPlayer !== 0 || state.players[0].hand.length !== 2) unoArmed = false;
     /* Always written, so a successful action clears stale error text. */
     setMessage((note || '').trim());
@@ -396,12 +403,12 @@
 
   function backToSetup() {
     clearTimeout(cpuTimer);
-    state = null;
     /*
-     * Both ways here end the game for good, New game and Play again, so a
-     * reload must not bring it back.
+     * Both ways here end the game for good, New game and Play again, so
+     * adopting null also clears the save and a reload cannot bring it
+     * back.
      */
-    S.clear(storage);
+    adopt(null);
     $('game-screen').classList.add('hidden');
     $('summary-modal').classList.add('hidden');
     $('color-modal').classList.add('hidden');
@@ -417,13 +424,11 @@
 
     $('setup-screen').classList.add('hidden');
     $('game-screen').classList.remove('hidden');
-    state = E.createGame({
+    adopt(E.createGame({
       numPlayers: opponents + 1,
       targetScore: target,
       challengeRule: $('challenge-rule').checked
-    }, rng);
-    /* The one new state that does not come through commit(). */
-    S.persist(storage, state);
+    }, rng));
     unoArmed = false;
     setMessage(state.currentPlayer === 0 ? 'Your move.' : playerName(state.currentPlayer) + ' starts.');
     render();
@@ -442,7 +447,8 @@
   function resumeSavedGame() {
     var saved = S.load(storage);
     if (!saved) return;
-    state = saved;
+    /* Saving it again is harmless: it writes back the same state. */
+    adopt(saved);
     unoArmed = false;
     pendingWildIndex = null;
     $('setup-screen').classList.add('hidden');
