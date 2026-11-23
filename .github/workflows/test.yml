@@ -1,0 +1,43 @@
+# Runs both test suites on every pull request, so a broken change shows
+# up in review instead of after it merges. pages.yml still runs them
+# again on main before it deploys.
+#
+# This is a separate file rather than a pull_request trigger added to
+# pages.yml because two settings in that file apply to every run it
+# starts, PRs included. Its workflow-level permissions would hand PR code
+# a token that can publish the site, and its "pages" concurrency group
+# with cancel-in-progress would let a push to any PR cancel a deploy
+# midway. Runs started here never see either.
+#
+# The steps mirror the test job in pages.yml on purpose, so a green PR
+# predicts a green deploy. A new test suite has to be added to both.
+name: Tests
+
+# pull_request, not pull_request_target: a run for a PR from a fork gets
+# a read-only token and no secrets, which is the safe default for
+# executing code nobody has reviewed yet.
+on: pull_request
+
+permissions:
+  contents: read
+
+# Concurrency groups are shared by every workflow in the repository, so
+# this name must never collide with the deploy's "pages" group. Keyed on
+# the PR's ref, a new push cancels only that PR's stale run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Both suites finish in seconds. Without a cap, a test stuck in a loop
+    # would hold the PR's check open for the six-hour default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: node engine.test.js
+      - run: node ai.test.js

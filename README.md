@@ -34,6 +34,9 @@ node engine.test.js
 node ai.test.js
 ```
 
+Both suites run on every pull request (`.github/workflows/test.yml`) and
+again on `main` before each deploy (`.github/workflows/pages.yml`).
+
 ## Rules notes
 
 - Wild Draw Four is always playable. The official challenge rule sits
