@@ -4,8 +4,9 @@
  * The only layer allowed to touch the DOM. It holds the current game
  * state and mutates it exclusively through engine functions (plus the
  * AI's chooseAction for CPU seats), then re-renders everything from the
- * state, so the screen can never drift from the rules. Every state it
- * adopts is also handed to save.js, so a reload resumes the game.
+ * state, so the screen can never drift from the rules. The one other
+ * way in is a game restored by save.js, which validates it first. Every
+ * state the UI adopts is handed back to save.js, so a reload resumes it.
  */
 (function () {
   'use strict';
@@ -91,8 +92,9 @@
     }
     state = next;
     /*
-     * Saved on every transition, CPU moves included, so a reload never
-     * rewinds the game. A finished game clears the save instead.
+     * Saved on every transition, CPU moves included, so a reload resumes
+     * the latest move rather than an older one. A finished game clears
+     * the save instead.
      */
     S.persist(storage, state);
     if (state.currentPlayer !== 0 || state.players[0].hand.length !== 2) unoArmed = false;

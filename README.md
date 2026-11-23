@@ -24,12 +24,14 @@ it just cannot be resumed.
   all randomness through an injected rng. Runs under node with no DOM.
 - `ai.js` - pure CPU decision functions `chooseAction(state, playerIndex, rng)`
   and `decideChallenge(state, playerIndex, rng)`.
-- `save.js` - pure save and resume: encodes the engine state with a
-  version number, and restores it only when the version matches and
-  `validateState` finds nothing wrong. Storage is passed in, so a
-  missing, blocked, or full localStorage cannot break play.
+- `save.js` - save and resume, pure apart from the storage it is handed:
+  encodes the engine state with a version number, and restores it only
+  when the version matches and `validateState` finds nothing wrong.
+  Every storage call is wrapped, so a missing, blocked, or full
+  localStorage cannot break play.
 - `ui.js` - the only file that touches the DOM; mutates state exclusively
-  through engine functions, and saves every state it adopts.
+  through engine functions, or restores a game saved earlier through
+  `save.js`, and saves every state it adopts.
 - `index.html`, `style.css` - markup and card-table styling.
 - `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
   for the test suites.

@@ -2,9 +2,10 @@
  * save.test.js
  *
  * Zero-dependency tests for save.js, run with `node save.test.js` or as
- * part of `node --test`. Storage is faked so every failure mode a browser
- * can produce (missing, blocked, full, throwing) is reproduced exactly,
- * and all game states come from seeded games so every run is identical.
+ * part of `node --test`. Storage is faked so each failure save.js has to
+ * survive (no storage, a localStorage getter that throws, every call
+ * throwing, writes refused as when full) happens on cue, and all game
+ * states come from seeded games so every run is identical.
  *
  * No saved string is pinned here. Each test builds its saves through
  * encode or from VERSION, so the tests describe the rules for accepting
@@ -12,6 +13,7 @@
  */
 'use strict';
 
+var assertNode = require('assert');
 var E = require('./engine.js');
 var S = require('./save.js');
 var U = require('./testutil.js');
@@ -47,7 +49,18 @@ function fullStorage(start) {
   return s;
 }
 
-function same(a, b) { return JSON.stringify(a) === JSON.stringify(b); }
+/*
+ * Node's own deep comparison, which also sees what a JSON string would
+ * hide (a key present but undefined, NaN, -0). Still zero-dependency.
+ */
+function same(a, b) {
+  try {
+    assertNode.deepStrictEqual(a, b);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
 
 /*
  * One seeded legal step, chosen the same way as the engine soak tests.
@@ -93,16 +106,16 @@ test('a fresh game round-trips unchanged at every table size', function () {
 test('a save holds the version and the engine state and nothing else', function () {
   var g = E.createGame({ numPlayers: 2 }, seededRng(1));
   var data = JSON.parse(S.encode(g));
-  assertEqual(Object.keys(data).sort().join(','), 'state,version');
   assertEqual(data.version, S.VERSION);
   assert(same(data.state, g), 'state is stored as is');
+  assertEqual(Object.keys(data).length, 2, 'no other fields');
 });
 
 test('every state of seeded games survives a save, and plays on identically', function () {
   /*
-   * The strongest form of "restore works": at every step, a game rebuilt
-   * from its save and driven by an identical rng makes exactly the same
-   * next move as the original. Challenge and stacking windows, Uno
+   * Restore checked two ways at every step: the rebuilt state is deeply
+   * equal to the original, and driven by an identical rng it makes
+   * exactly the same next move. Challenge and stacking windows, Uno
    * windows, pending draws, and round summaries all come up along the
    * way.
    */

@@ -1,11 +1,11 @@
 /*
  * testutil.js
  *
- * Shared helpers for the zero-dependency test suites. Node-only: the
- * suites run with `node engine.test.js` / `node ai.test.js`, so a plain
- * module.exports is enough. Extracted into one module so the seeded rng,
- * the deck-stacking convention, and the runner cannot drift between the
- * two suites.
+ * Shared helpers for the zero-dependency test suites. Node-only: each
+ * suite runs on its own (`node engine.test.js`) or under `node --test`,
+ * so a plain module.exports is enough. Extracted into one module so the
+ * seeded rng, the deck-stacking convention, and the runner cannot drift
+ * between the suites.
  */
 'use strict';
 

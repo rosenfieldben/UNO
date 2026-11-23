@@ -13,7 +13,9 @@
  * so it cannot be saved by accident.
  *
  * Same classic-script wrapper as engine.js and ai.js, so it loads from a
- * file:// URL as window.UnoSave and under node via require().
+ * file:// URL as window.UnoSave and under node via require(). Like ai.js
+ * it needs the engine: under node it requires it, and in the browser
+ * engine.js must load first, which index.html does.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
@@ -49,10 +51,14 @@
    * restored. Callers never need to tell the reasons apart: whatever the
    * cause, the player simply starts at the setup screen.
    *
-   * validateState is the gate because it checks the deck-conservation
-   * invariant, which catches a truncated or hand-edited save as well as a
-   * stale shape. It assumes a well-formed object, though, and throws on
-   * some malformed ones (a hand that is not an array, a null card), so a
+   * The two gates guard different things. validateState catches a save
+   * whose cards or seats are wrong, because it checks deck conservation,
+   * seat ranges, the phase, and the colors. It does not check that every
+   * field is present: it reads no config field but numPlayers, so a save
+   * missing targetScore or a field the AI reads would pass it. A change
+   * of shape is caught only by VERSION, which is why it must be bumped.
+   * validateState also assumes a well-formed object and throws on some
+   * malformed ones (a hand that is not an array, a null card), so a
    * throw counts as a rejection too.
    */
   function decode(text) {
@@ -100,8 +106,10 @@
     if (text === null || text === undefined) return null;
     var state = decode(text);
     /*
-     * A save that fails once will fail on every later load too, so it is
-     * thrown away rather than re-read each time the page opens.
+     * A save this code cannot use is removed rather than re-read on every
+     * visit. That includes one from a newer version, which the newer code
+     * could have resumed; only one version of the game is expected per
+     * origin, so that loss is accepted for a simple rule.
      */
     if (state === null) clear(storage);
     return state;
