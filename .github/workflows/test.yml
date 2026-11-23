@@ -2,13 +2,12 @@
 # up in review instead of after it merges. pages.yml runs them again on
 # main before it deploys.
 #
-# This is a separate file rather than a pull_request trigger added to
-# pages.yml because two settings in that file apply to every run it
-# starts. Its workflow-level pages: write and id-token: write would reach
-# any PR run from a branch in this repo, a deploy grant test code never
-# needs. Its "pages" concurrency group with cancel-in-progress would let
-# a push to any PR, forks included, cancel a deploy midway. This file
-# asks for neither.
+# This is a separate file rather than a pull_request trigger in pages.yml
+# because PR runs must never share the deploy's concurrency group or its
+# permission block. Any run in that group can hold up or displace a
+# deploy, and those permissions exist to publish the site. Code nobody
+# has reviewed yet needs neither, and keeping PR runs in their own file
+# holds that line however pages.yml's settings change.
 #
 # The steps mirror the test job in pages.yml on purpose, so a green PR
 # predicts a green deploy. Both run node --test, which finds every

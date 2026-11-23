@@ -11,18 +11,34 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# The default for every job is to read the code and nothing else. A job
+# that lists its own permissions replaces this block instead of adding to
+# it, which is why the deploy job repeats contents: read.
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# One run at a time, and a later run never cancels one in progress.
+# Cancelling would leave the site on an older commit whenever the later
+# run then failed its tests or was a manual run from a branch that is
+# not allowed to deploy. GitHub keeps one run waiting per group and
+# cancels that one when a newer run arrives, which suits pushes to main:
+# the newest contains every commit before it.
+#
+# The group covers the whole run, not just the deploy job, so runs queue
+# in the order they were triggered. On the deploy job alone, an older
+# commit whose tests ran slower could deploy after a newer one and roll
+# the site back.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    # The suites take seconds and node --test has no time limit of its
+    # own; without a cap, a test stuck in a loop would hold up every
+    # deploy behind it for six hours.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -33,6 +49,19 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
+    # deploy-pages waits at most 10 minutes for Pages once it has created
+    # the deployment, then cancels it. This cap leaves room for that wait
+    # and the steps before it, so it only ends a step that hangs outright.
+    timeout-minutes: 15
+    # Only this job talks to Pages, so only it gets the write scopes; the
+    # test job runs repo code and never needs them. pages: write lets
+    # configure-pages read the site and deploy-pages create the deployment.
+    # id-token: write lets deploy-pages request the OIDC token Pages uses
+    # to check where the deployment came from.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
