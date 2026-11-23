@@ -1,0 +1,49 @@
+# Runs every test suite on every pull request, so a broken change shows
+# up in review instead of after it merges. pages.yml runs them again on
+# main before it deploys.
+#
+# This is a separate file rather than a pull_request trigger added to
+# pages.yml because two settings in that file apply to every run it
+# starts. Its workflow-level pages: write and id-token: write would reach
+# any PR run from a branch in this repo, a deploy grant test code never
+# needs. Its "pages" concurrency group with cancel-in-progress would let
+# a push to any PR, forks included, cancel a deploy midway. This file
+# asks for neither.
+#
+# The steps mirror the test job in pages.yml on purpose, so a green PR
+# predicts a green deploy. Both run node --test, which finds every
+# *.test.js file by its name, so a new suite needs no edit to either
+# workflow and the two lists cannot drift apart.
+name: Tests
+
+# pull_request, not pull_request_target: a run for a PR from a fork gets
+# a read-only token and no secrets, which is the safe default for
+# executing code nobody has reviewed yet.
+on: pull_request
+
+permissions:
+  contents: read
+
+# Concurrency groups are shared by every workflow in the repository, so
+# this name must never collide with the deploy's "pages" group. Because
+# the group is keyed on the PR's ref, a new push cancels only that PR's
+# stale run.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # Branch protection matches required checks by name, and pages.yml's
+    # job is also called "test", so this one gets a name of its own.
+    name: PR tests
+    runs-on: ubuntu-latest
+    # The suites finish in seconds. Without a cap, a test stuck in a loop
+    # would hold the PR's check open for the six-hour default.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: node --test

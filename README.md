@@ -27,12 +27,23 @@ played at you waits for Challenge! or Take 4 before anything is drawn.
 
 ## Tests
 
-Zero-dependency, deterministic under seeded rngs:
+Zero-dependency, deterministic under seeded rngs. From the repo root:
 
 ```
-node engine.test.js
-node ai.test.js
+node --test
 ```
+
+Node's built-in runner finds every `*.test.js` file, runs each in its own
+process, and fails if any suite fails or crashes. A suite also runs on
+its own, for example `node engine.test.js`, which prints only its output.
+
+A new suite is picked up by its name alone, here and in CI. Helper
+scripts must avoid the names Node treats as tests: `*.test.js`,
+`*-test.js`, `*_test.js`, `test-*.js`, `test.js`, or anything under a
+`test/` folder.
+
+The suites run on every pull request (`.github/workflows/test.yml`) and
+again on `main` before each deploy (`.github/workflows/pages.yml`).
 
 ## Rules notes
 
