@@ -17,18 +17,17 @@ on:
 permissions:
   contents: read
 
-# One deploy at a time, and a deploy that has started always finishes.
-# Cancelling one partway gained nothing: if the run that cancelled it
-# then failed its tests, or was a manual run from a branch that may not
-# deploy, the commit it stopped never went live. A run that arrives
-# during a deploy now waits instead. If several pile up, only the newest
-# keeps waiting and the ones in between are skipped, because the newest
-# commit is the one that should end up live.
+# One run at a time, and a later run never cancels one in progress.
+# Cancelling would leave the site on an older commit whenever the later
+# run then failed its tests or was a manual run from a branch that is
+# not allowed to deploy. GitHub keeps one run waiting per group and
+# cancels that one when a newer run arrives, which suits pushes to main:
+# the newest contains every commit before it.
 #
-# This stays at workflow level rather than on the deploy job, so a whole
-# run joins the queue as soon as it starts. Per job, a deploy would only
-# join after its own tests passed, and an older commit whose tests ran
-# slower could deploy after a newer one and roll the site back.
+# The group covers the whole run, not just the deploy job, so runs queue
+# in the order they were triggered. On the deploy job alone, an older
+# commit whose tests ran slower could deploy after a newer one and roll
+# the site back.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -36,9 +35,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Same cap as the PR tests job in test.yml. The suites take seconds and
-    # node --test has no time limit of its own; without a cap, a test stuck
-    # in a loop would hold up every deploy behind it for six hours.
+    # The suites take seconds and node --test has no time limit of its
+    # own; without a cap, a test stuck in a loop would hold up every
+    # deploy behind it for six hours.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -50,17 +49,15 @@ jobs:
   deploy:
     needs: test
     runs-on: ubuntu-latest
-    # deploy-pages gives up on its own after 10 minutes and cancels the
-    # deployment cleanly. This cap sits above that so the clean cancel
-    # always fires first; it only catches a step that hangs outright.
+    # deploy-pages waits at most 10 minutes for Pages once it has created
+    # the deployment, then cancels it. This cap leaves room for that wait
+    # and the steps before it, so it only ends a step that hangs outright.
     timeout-minutes: 15
     # Only this job talks to Pages, so only it gets the write scopes; the
-    # test job runs repo code and never needs them. checkout needs
-    # contents: read, and the upload step packages what it checked out.
-    # configure-pages reads the site's settings and deploy-pages creates
-    # the deployment, both under pages: write. deploy-pages also needs
-    # id-token: write to request the token that proves to Pages the
-    # deploy came from this repository's workflow.
+    # test job runs repo code and never needs them. pages: write lets
+    # configure-pages read the site and deploy-pages create the deployment.
+    # id-token: write lets deploy-pages request the OIDC token Pages uses
+    # to check where the deployment came from.
     permissions:
       contents: read
       pages: write
