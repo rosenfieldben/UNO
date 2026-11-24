@@ -69,8 +69,10 @@
  * reuses the same seeds so chances compare like for like. By default
  * victims decide with the AI's own decideChallenge, exactly as CPU
  * victims do in the browser; --victims accept or challenge makes every
- * victim always do that instead, which brackets how a person might
- * answer, since what a bluff is worth depends on how often it is called.
+ * victim never or always challenge instead, which brackets how a person
+ * might answer, since what a bluff is worth depends on how often it is
+ * called. With --stack a victim that does not challenge still answers
+ * with its own Wild Draw Four when it holds one, as the CPU does.
  */
 'use strict';
 
@@ -208,7 +210,7 @@ function forks() { return { guilty: { wins: [], pts: [] }, honest: { wins: [], p
 /* Pass 1, and pass 3 when asked: bluff share, tells, and the fork. */
 function bluffShare(numPlayers, chance, opts) {
   var t = {
-    lastCard: 0, all: tally(), low: tally(), high: tally(),
+    lastCard: 0, stackedLastCard: 0, all: tally(), low: tally(), high: tally(),
     off12: tally(), off34: tally(), off5: tally(), sameBluff: tally(), sameHonest: tally(),
     stacked: tally(), stackedLow: tally(), stackedHigh: tally(), stackedSame: tally(),
     fork: { off14: forks(), off5: forks(), stacked: forks() }
@@ -221,12 +223,15 @@ function bluffShare(numPlayers, chance, opts) {
     playOut(g.state, g.rng, every, opts.victims, function (before, after, action) {
       var seat = before.currentPlayer;
       var offenderLeft = after.players[seat].hand.length;
-      if (offenderLeft === 0) { t.lastCard++; return; }
+      /* An answer to a stack lands while the previous window is still open. */
+      var answer = !!before.pendingChallenge;
+      if (offenderLeft === 0) {
+        if (answer) t.stackedLastCard++; else t.lastCard++;
+        return;
+      }
       var guilty = after.pendingChallenge.hadColorMatch;
       var victim = after.pendingChallenge.victim;
       var low = before.players[victim].hand.length <= 2;
-      /* An answer to a stack lands while the previous window is still open. */
-      var answer = !!before.pendingChallenge;
       if (answer) {
         add(t.stacked, guilty);
         add(low ? t.stackedLow : t.stackedHigh, guilty);
@@ -279,11 +284,19 @@ function yardstick(f, key, scale, digits) {
   var G = mean(f.guilty[key]), L = -mean(f.honest[key]);
   function show(x) { return isFinite(x) ? (scale * x).toFixed(digits) : 'n/a'; }
   /*
-   * The ratio only means something when a guilty verdict helps and an
-   * honest one hurts. Otherwise one answer is better whatever the share.
+   * L / (L + G) is the guilty share above which challenging pays, but
+   * only when a guilty verdict helps (G > 0) and an honest one hurts
+   * (L > 0). If neither hurts, challenging pays at any share, and if
+   * neither helps, at none. Both negative, which only noise in a small
+   * bucket produces, flips it: challenging then pays below the ratio,
+   * shown with a leading '<'.
    */
-  var be = !(isFinite(G) && isFinite(L)) ? 'n/a'
-    : L <= 0 ? 'always' : G <= 0 ? 'never' : (100 * L / (L + G)).toFixed(1) + '%';
+  var be;
+  if (!(isFinite(G) && isFinite(L))) be = 'n/a';
+  else if (G > 0 && L > 0) be = (100 * L / (L + G)).toFixed(1) + '%';
+  else if (G >= 0 && L <= 0) be = G === 0 && L === 0 ? 'even' : 'always';
+  else if (G <= 0 && L >= 0) be = 'never';
+  else be = '<' + (100 * L / (L + G)).toFixed(1) + '%';
   return show(G).padStart(7) + show(L).padStart(7) + be.padStart(8) + '  ' +
     meanCI(f.guilty[key].concat(f.honest[key]), scale).padEnd(25);
 }
@@ -298,7 +311,8 @@ function main() {
   var opts = parseArgs(process.argv);
   console.log('Rounds per table size: ' + opts.rounds + '. Challenge rule on, stacking ' +
     (opts.stack ? 'on' : 'off') + '. Victims: ' +
-    { cpu: 'the CPU challenge rule', accept: 'always accept', challenge: 'always challenge' }[opts.victims] + '.');
+    { cpu: 'the CPU challenge rule', accept: 'never challenge', challenge: 'always challenge' }[opts.victims] +
+    (opts.stack && opts.victims !== 'challenge' ? ', answering a stack when able.' : '.'));
   console.log('Guilty = the CPU held the color in play when it played the Wild Draw Four. Shares leave out');
   console.log('Wild Draw Fours played as a last card, which are innocent by construction' +
     (opts.stack ? ', and count answers to a stack apart.' : '.'));
@@ -319,12 +333,14 @@ function main() {
       return { n: n, t: t };
     });
     if (opts.stack) {
-      console.log('players | answers to a stack: n  per 100 rounds  guilty (95% CI)         | victim 1-2: n  guilty |' +
+      console.log('players | answers to a stack: n  last card  per 100 rounds  guilty (95% CI)         | victim 1-2: n  guilty |' +
         ' victim 3+: n  guilty | guilty ones re-declaring the color in play');
       rows.forEach(function (row) {
         var t = row.t;
         console.log(String(row.n).padStart(7) + ' | ' + String(t.stacked[1]).padStart(21) + ' ' +
-          (100 * t.stacked[1] / opts.rounds).toFixed(1).padStart(15) + ' ' + pct(t.stacked[0], t.stacked[1]) + ' ' +
+          String(t.stackedLastCard).padStart(10) + ' ' +
+          (100 * (t.stacked[1] + t.stackedLastCard) / opts.rounds).toFixed(1).padStart(15) + ' ' +
+          pct(t.stacked[0], t.stacked[1]) + ' ' +
           wilson(t.stacked[0], t.stacked[1]).padEnd(17) + ' | ' +
           String(t.stackedLow[1]).padStart(12) + ' ' + pct(t.stackedLow[0], t.stackedLow[1]) + ' | ' +
           String(t.stackedHigh[1]).padStart(11) + ' ' + pct(t.stackedHigh[0], t.stackedHigh[1]) + ' | ' +
