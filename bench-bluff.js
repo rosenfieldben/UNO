@@ -35,8 +35,10 @@
  * 3. With --breakeven, what a challenge is worth in play rather than in
  *    cards. At every challengeable CPU Wild Draw Four in pass 1 played at
  *    a victim holding one or two cards, the game is forked, the victim
- *    accepts in one copy and challenges in the other, and both play out
- *    from the same seed. G is the victim's gain from challenging a guilty
+ *    challenges in one copy and does not in the other, and both play out
+ *    from the same seed. Not challenging means the victim's own next
+ *    move: taking the total, or with --stack answering with its own Wild
+ *    Draw Four when it holds one, as the CPU always does. G is the victim's gain from challenging a guilty
  *    play, L the loss from challenging an innocent one, and challenging
  *    pays when the share of guilty plays is above L / (L + G). The last
  *    column is the mean gain from challenging every one of them, which
@@ -202,6 +204,19 @@ function tally() { return [0, 0]; }
 function add(t, hit) { t[1]++; if (hit) t[0]++; }
 
 /*
+ * The fork's copy without a challenge: the victim makes the move it
+ * would make anyway. With stacking off, or holding no Wild Draw Four,
+ * that is taking the total, and chooseAction returns it without touching
+ * the rng. Under stacking a victim holding one answers with it instead,
+ * so building this copy from applyDraw alone would weigh the challenge
+ * against a move nobody makes.
+ */
+function decline(after, chance, rng) {
+  var action = AI.chooseAction(withChance(after, chance), after.currentPlayer, rng);
+  return action.type === 'draw' ? E.applyDraw(after, rng) : E.applyPlay(after, action, rng);
+}
+
+/*
  * One fork's outcome for each yardstick: guilty or honest, and what
  * challenging gained over accepting in round wins and in points.
  */
@@ -249,7 +264,7 @@ function bluffShare(numPlayers, chance, opts) {
          */
         if (forked >= FORKS) throw new Error('more than ' + FORKS + ' forks in one round');
         var forkSeed = (SEEDS.fork + numPlayers) * 1e8 + r * FORKS + (forked++);
-        var accepted = playOut(E.applyDraw(after, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
+        var accepted = playOut(decline(after, chance, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
         var challenged = playOut(E.applyChallenge(after, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
         var bucket = answer ? t.fork.stacked : offenderLeft <= 4 ? t.fork.off14 : t.fork.off5;
         var side = guilty ? bucket.guilty : bucket.honest;
@@ -356,7 +371,7 @@ function main() {
       });
     }
     if (opts.breakeven) {
-      console.log('Challenge against accept, from the victim\'s side. Round wins in percentage points, points in card points.');
+      console.log('Challenge against not challenging, from the victim\'s side. Round wins in percentage points, points in card points.');
       console.log('players | at victim 1-2   |      n guilty |      G      L   break  challenge every one (95% CI) |' +
         '      G      L   break  challenge every one (95% CI)');
       console.log('        |                 |               |  round wins                                       |' +
