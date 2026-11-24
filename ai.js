@@ -32,15 +32,21 @@
    * The declared color for a Wild is the color the hand is longest in,
    * because that maximizes the chance of having a follow-up play. Ties
    * break in fixed COLORS order so the choice stays deterministic.
+   *
+   * avoidColor exists for bluffs. An honest Wild Draw Four almost never
+   * re-declares the color already in play, because the player holds none
+   * of it; a bluffer holding plenty would. Declaring it would announce
+   * the bluff to the whole table, so a bluff picks the best other color.
    */
-  function bestColor(hand, excludeIndex) {
+  function bestColor(hand, excludeIndex, avoidColor) {
     var counts = { red: 0, yellow: 0, green: 0, blue: 0 };
     hand.forEach(function (card, i) {
       if (i !== excludeIndex && card.color) counts[card.color] += 1;
     });
-    var best = E.COLORS[0];
+    var best = null;
     E.COLORS.forEach(function (color) {
-      if (counts[color] > counts[best]) best = color;
+      if (color === avoidColor) return;
+      if (best === null || counts[color] > counts[best]) best = color;
     });
     return best;
   }
@@ -108,6 +114,18 @@
   }
 
   /*
+   * Whether to bluff with a Wild Draw Four this turn. The chance comes
+   * from config and the roll from the injected rng, the same way the Uno
+   * forget chance works. A chance of 0 draws nothing from the rng, so a
+   * game without bluffing consumes randomness exactly as it did before
+   * bluffing existed and seeded games replay unchanged.
+   */
+  function decideBluff(state, rng) {
+    var chance = state.config.cpuBluffChance;
+    return chance > 0 && rng() < chance;
+  }
+
+  /*
    * Whether the hand still holds the color that is currently in play,
    * which is exactly what makes a Wild Draw Four challengeable.
    */
@@ -118,7 +136,7 @@
     });
   }
 
-  function makePlay(state, playerIndex, pick, rng) {
+  function makePlay(state, playerIndex, pick, rng, avoidColor) {
     var hand = state.players[playerIndex].hand;
     var action = {
       type: 'play',
@@ -127,7 +145,7 @@
       declareUno: decideUnoCall(state, hand, rng)
     };
     if (E.isWild(pick.card)) {
-      action.chosenColor = bestColor(hand, pick.cardIndex);
+      action.chosenColor = bestColor(hand, pick.cardIndex, avoidColor);
     }
     return action;
   }
@@ -140,7 +158,8 @@
    *
    * Strategy, in priority order:
    *   1. If the next opponent is down to two or fewer cards, hit them
-   *      with a legal Draw Two or Wild Draw Four.
+   *      with a legal Draw Two or Wild Draw Four, sometimes bluffing
+   *      the Wild Draw Four (see below).
    *   2. Otherwise play a non-wild card, preferring the color the hand
    *      holds most of; Wilds are held back as long as any other play
    *      exists, since they are legal on anything and only gain value.
@@ -162,22 +181,45 @@
     var nextOpponent = state.players[E.playerAfter(state, playerIndex, 1)];
 
     if (nextOpponent.hand.length <= 2) {
-      /*
-       * Prefer spending the cheap Draw Two before the Wild Draw Four.
-       * With the challenge rule on, a Wild Draw Four played while
-       * holding the active color can be sent straight back, and the CPU
-       * cannot see whether the victim will call it: drawing four to hand
-       * out four is a bad trade, and the card keeps its value for a turn
-       * when the play is honest. Skipping it here can never strand the
-       * CPU, since a card of the active color is a legal play by color.
-       */
-      var bluffs = state.config.challengeRule && holdsActiveColor(state, playerIndex);
-      var punish = null;
+      /* Prefer spending the cheap Draw Two before the Wild Draw Four. */
+      var draw2 = null, wild4 = null, hasOther = false;
       plays.forEach(function (p) {
-        if (p.card.value === 'draw2' && (!punish || punish.card.value !== 'draw2')) punish = p;
-        if (p.card.value === 'wild4' && !punish && !bluffs) punish = p;
+        if (p.card.value === 'draw2' && !draw2) draw2 = p;
+        if (p.card.value === 'wild4') { if (!wild4) wild4 = p; } else hasOther = true;
       });
-      if (punish) return makePlay(state, playerIndex, punish, rng);
+      if (draw2) return makePlay(state, playerIndex, draw2, rng);
+      /*
+       * With the challenge rule on, a Wild Draw Four played while holding
+       * the color in play is a bluff: legal, but a challenge would catch
+       * it. A CPU that never bluffs makes every challenge an almost sure
+       * loss, so here it bluffs with probability cpuBluffChance.
+       *
+       * Only here, against an opponent about to go out. When this was
+       * tuned, a scratch version (not committed) that also bluffed in
+       * ordinary play lost 2 to 3 points of round win rate in
+       * bench-bluff.js at chance 0.2, because it spends the Wild Draw
+       * Four long before it matters. Bluffing only here, at the default
+       * chance, costs nothing measurable against the same seeds played
+       * without it (the bench's win-rate pass). The price is a tell, by
+       * deliberate choice: with stacking off, a Wild Draw Four played at
+       * someone holding three or more cards is never a chosen bluff.
+       *
+       * The roll happens only when it decides something: the Wild Draw
+       * Four would be a bluff and another legal play exists. With the
+       * rule off nothing is a bluff and nothing is rolled, so play there
+       * is exactly as before. A Wild Draw Four that is the only legal
+       * card, as when answering a stacked one, is not a bluff decision
+       * either: the CPU plays it as it always did, guilty or not.
+       * Declining is always safe, since it only happens when another
+       * legal play exists.
+       */
+      if (wild4) {
+        var wouldBluff = state.config.challengeRule && holdsActiveColor(state, playerIndex);
+        if (!wouldBluff) return makePlay(state, playerIndex, wild4, rng);
+        if (hasOther && decideBluff(state, rng)) {
+          return makePlay(state, playerIndex, wild4, rng, state.currentColor);
+        }
+      }
     }
 
     var nonWild = plays.filter(function (p) { return !E.isWild(p.card); });

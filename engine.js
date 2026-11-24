@@ -528,7 +528,18 @@
          * kept in config so one object describes the whole game and the
          * human gets a chance to catch forgetful CPUs.
          */
-        cpuForgetUnoChance: config.cpuForgetUnoChance != null ? config.cpuForgetUnoChance : 0.2
+        cpuForgetUnoChance: config.cpuForgetUnoChance != null ? config.cpuForgetUnoChance : 0.2,
+        /*
+         * Consumed by the AI layer when it could bluff a Wild Draw Four
+         * (see chooseAction in ai.js), and only with challengeRule on:
+         * without the challenge nothing is a bluff. In config for the
+         * same reason as cpuForgetUnoChance. 0.1 makes about one in nine
+         * Wild Draw Fours played at a player holding one or two cards a
+         * bluff, close to where challenging starts to pay in round wins,
+         * so the challenge is a real gamble. bench-bluff.js measures it
+         * and the README has the reasoning.
+         */
+        cpuBluffChance: config.cpuBluffChance != null ? config.cpuBluffChance : 0.1
       },
       players: [],
       round: 0,

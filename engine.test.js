@@ -70,6 +70,24 @@ test('createGame deals 7 cards each and flips one card', function () {
   assert(E.topDiscard(g).value !== 'wild4', 'first flip must never be a Wild Draw Four');
 });
 
+test('createGame keeps the CPU chances in config, and bluffing is on by default', function () {
+  /*
+   * The engine never reads these; they ride in config so one object
+   * describes the whole game, saves included. The default bluff chance
+   * is a tuning choice documented in the README, so this checks that it
+   * is a real probability strictly between 0 and 1, rather than pinning
+   * its value: 0 would quietly switch bluffing off in the shipped game,
+   * where ui.js passes no chance, and 1 would make every chance a bluff.
+   */
+  var set = E.createGame({ numPlayers: 2, cpuBluffChance: 0.4, cpuForgetUnoChance: 0.1 }, seededRng(1));
+  assertEqual(set.config.cpuBluffChance, 0.4);
+  assertEqual(set.config.cpuForgetUnoChance, 0.1);
+  assertEqual(E.createGame({ numPlayers: 2, cpuBluffChance: 0 }, seededRng(1)).config.cpuBluffChance, 0,
+    'an explicit 0 is kept, not replaced by the default');
+  var dflt = E.createGame({ numPlayers: 2 }, seededRng(1)).config.cpuBluffChance;
+  assert(typeof dflt === 'number' && dflt > 0 && dflt < 1, 'bluffing is on by default, and not certain');
+});
+
 test('preset deck deals in seat order with the flip after the deal', function () {
   var g = makeGame([FILLER[0], FILLER[1]], card('red', '5'));
   assert(sameCard(g.players[0].hand[0], card('green', '1')));

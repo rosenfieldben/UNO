@@ -35,6 +35,14 @@ it just cannot be resumed.
 - `index.html`, `style.css` - markup and card-table styling.
 - `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
   for the test suites.
+- `bench-bluff.js` - seeded all-CPU bench for Wild Draw Four bluffing:
+  the share of CPU Wild Draw Fours that are guilty, split by what a
+  player can see at the table, and what bluffing does to a CPU's round
+  win rate against the same rounds played without it. With
+  `--breakeven` it also measures what a challenge is worth in round
+  wins. Run it with `node bench-bluff.js`, which takes a couple of
+  minutes; it is a measurement, not a test, and its name keeps it out of
+  `node --test`.
 
 ## Tests
 
@@ -83,6 +91,31 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   own. No official rule covers the combination, so this is a house
   choice; with stacking off it reduces exactly to the official four and
   six.
+- With the challenge rule on, CPU players sometimes bluff: they play a
+  Wild Draw Four while still holding the color in play, which a
+  challenge would catch. They only bluff when the next player is down to
+  one or two cards, and then with probability `cpuBluffChance` (default
+  0.1). Bluffing in ordinary play as well was tried and cost a CPU two to
+  three points of round win rate, because it spends the Wild Draw Four
+  too early; bluffing only against a low hand costs nothing measurable.
+- When to challenge. Call g the share of Wild Draw Fours you face that
+  are bluffs. Counting cards, a failed challenge costs six against four
+  for accepting, so challenging pays when 6 x (1 - g) < 4, that is when
+  g is above one third. That undersells it: a successful challenge also
+  keeps your turn, and with one or two cards left that turn often wins
+  the round. Measured in round wins (`node bench-bluff.js --breakeven`),
+  challenging at one or two cards pays once g is above roughly 10 to
+  15%. At the default the CPU bluffs about 10 to 13% of the time
+  against a hand that small, so the call is a genuine gamble. Against a
+  hand of three or more, with stacking off, a CPU Wild Draw Four is
+  never a chosen bluff, so accepting is right.
+- Tells. A player can read some of this from the table. Besides your own
+  hand size, the offender's matters most: at the default, a Wild Draw
+  Four from a CPU left with one or two cards is a bluff about 3% of the
+  time, against about a quarter of the time from one holding five or
+  more, since a big hand is likely to still hold the color in play. A
+  bluffing CPU never re-declares the color already in play, so that
+  gives nothing away.
 - Reverse acts as Skip in a two-player game.
 - Failing to call Uno before the next action costs two cards; in a
   two-player game an action card that hands you the turn straight back
