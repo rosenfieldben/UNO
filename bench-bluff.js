@@ -4,7 +4,7 @@
  * Seeded all-CPU playouts that measure Wild Draw Four bluffing with the
  * challenge rule on. Run with:
  *   node bench-bluff.js [--rounds N] [--chances 0,0.1,...]
- *                       [--victims cpu|accept|challenge] [--breakeven]
+ *                       [--victims cpu|accept|challenge] [--breakeven] [--stack]
  *
  * Not a test: the name keeps it out of `node --test` on purpose, since
  * it takes a minute or more and its job is to inform a choice, not to
@@ -32,13 +32,37 @@
  *    Comparing on the same seeds removes the luck of the deal, which a
  *    comparison against a fair 1/n share does not.
  *
- * 3. With --breakeven, what a challenge is worth in round wins rather
- *    than cards. At every challengeable CPU Wild Draw Four in pass 1 the
- *    game is forked, the victim accepts in one copy and challenges in
- *    the other, and both play out from the same seed. G is the victim's
- *    gain in round wins from challenging a guilty play, L the loss from
- *    challenging an innocent one, and challenging pays when the share of
- *    guilty plays is above L / (L + G). It is several times slower.
+ * 3. With --breakeven, what a challenge is worth in play rather than in
+ *    cards. At every challengeable CPU Wild Draw Four in pass 1 played at
+ *    a victim holding one or two cards, the game is forked, the victim
+ *    accepts in one copy and challenges in the other, and both play out
+ *    from the same seed. G is the victim's gain from challenging a guilty
+ *    play, L the loss from challenging an innocent one, and challenging
+ *    pays when the share of guilty plays is above L / (L + G). The last
+ *    column is the mean gain from challenging every one of them, which
+ *    answers the same question at the CPU's real bluff rate, with an
+ *    interval, and without dividing one noisy number by another.
+ *
+ *    Two yardsticks, because they can disagree. Round wins count only
+ *    who goes out. Points are the victim's side of the score margin: the
+ *    round's points if it goes out, otherwise minus the points left in
+ *    its hand, which is what it hands the winner. In a two-player game
+ *    that is exactly the change in the margin; with more players it
+ *    leaves out what the others hand each other. A failed challenge
+ *    costs two cards that a round win does not see when the victim goes
+ *    on to win anyway, and a successful one adds four cards to the
+ *    offender's hand that score only if the victim wins.
+ *
+ *    Both are split by the offender's hand after the play, one to four
+ *    cards or five and more, which is the tell a player can see best.
+ *    It is several times slower.
+ *
+ * 4. With --stack, the stacking house rule is on as well, so a victim
+ *    may answer a Wild Draw Four with their own. Those answers are
+ *    counted apart from Wild Draw Fours played on an ordinary turn,
+ *    since the answer was the only card the player was allowed to play
+ *    and is judged on the color the previous offender declared. With
+ *    --breakeven they are forked too, whatever the victim holds.
  *
  * Every round is its own seeded game, played to its first round end.
  * Each pass and table size has its own block of seeds, and every chance
@@ -56,14 +80,17 @@ var U = require('./testutil.js');
 
 /* Seed blocks: seeds are (base + players) * 1e6 + round, so --rounds must stay below 1e6. */
 var SEEDS = { share: 10, winRate: 20, fork: 30 };
+/* Fork seeds are base * 1e8 + round * FORKS + n, so a round may fork at most FORKS times. */
+var FORKS = 64;
 
 function parseArgs(argv) {
-  var opts = { rounds: 20000, chances: null, victims: 'cpu', breakeven: false };
+  var opts = { rounds: 20000, chances: null, victims: 'cpu', breakeven: false, stack: false };
   for (var i = 2; i < argv.length; i++) {
     if (argv[i] === '--rounds') opts.rounds = Number(argv[++i]);
     else if (argv[i] === '--chances') opts.chances = argv[++i].split(',').map(Number);
     else if (argv[i] === '--victims') opts.victims = argv[++i];
     else if (argv[i] === '--breakeven') opts.breakeven = true;
+    else if (argv[i] === '--stack') opts.stack = true;
     else throw new Error('unknown argument: ' + argv[i]);
   }
   if (!(Number.isInteger(opts.rounds) && opts.rounds > 0 && opts.rounds < 1e6)) {
@@ -124,9 +151,17 @@ function playOut(s, rng, chanceFor, victims, onWild4) {
   return s;
 }
 
-function newRound(seed, numPlayers) {
+function newRound(seed, numPlayers, stack) {
   var rng = U.seededRng(seed);
-  return { rng: rng, state: E.createGame({ numPlayers: numPlayers, targetScore: 1e9, challengeRule: true }, rng) };
+  return {
+    rng: rng,
+    state: E.createGame({ numPlayers: numPlayers, targetScore: 1e9, challengeRule: true, stackDraws: stack }, rng)
+  };
+}
+
+/* The victim's side of the score margin for a finished round (see the header). */
+function margin(final, seat) {
+  return final.roundWinner === seat ? final.roundPoints : -E.handPoints(final.players[seat].hand);
 }
 
 function pct(k, n) {
@@ -142,32 +177,47 @@ function wilson(k, n) {
   return '[' + (100 * Math.max(0, c - h)).toFixed(1) + ', ' + (100 * Math.min(1, c + h)).toFixed(1) + ']';
 }
 
-/* Mean of a list of per-round differences, with its 95% interval, in points. */
-function meanCI(diffs) {
-  var n = diffs.length, m = 0, v = 0;
-  diffs.forEach(function (d) { m += d; });
-  m /= n;
+function mean(xs) {
+  return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : NaN;
+}
+
+/*
+ * Mean of a list of differences with its 95% interval. scale 100 shows
+ * a difference in round wins as percentage points; scale 1 leaves card
+ * points as they are.
+ */
+function meanCI(diffs, scale) {
+  scale = scale || 100;
+  var n = diffs.length, m = mean(diffs), v = 0;
+  if (n < 2) return 'n/a';
   diffs.forEach(function (d) { v += (d - m) * (d - m); });
   var h = 1.96 * Math.sqrt(v / (n - 1) / n);
-  function f(x) { return (x >= 0 ? '+' : '') + (100 * x).toFixed(2); }
+  function f(x) { return (x >= 0 ? '+' : '') + (scale * x).toFixed(2); }
   return f(m) + ' [' + f(m - h) + ', ' + f(m + h) + ']';
 }
 
 function tally() { return [0, 0]; }
 function add(t, hit) { t[1]++; if (hit) t[0]++; }
 
+/*
+ * One fork's outcome for each yardstick: guilty or honest, and what
+ * challenging gained over accepting in round wins and in points.
+ */
+function forks() { return { guilty: { wins: [], pts: [] }, honest: { wins: [], pts: [] } }; }
+
 /* Pass 1, and pass 3 when asked: bluff share, tells, and the fork. */
 function bluffShare(numPlayers, chance, opts) {
   var t = {
     lastCard: 0, all: tally(), low: tally(), high: tally(),
     off12: tally(), off34: tally(), off5: tally(), sameBluff: tally(), sameHonest: tally(),
-    fork: { gain: [], loss: [] }
+    stacked: tally(), stackedLow: tally(), stackedHigh: tally(), stackedSame: tally(),
+    fork: { off14: forks(), off5: forks(), stacked: forks() }
   };
   function every() { return chance; }
   for (var r = 0; r < opts.rounds; r++) {
     var seed = (SEEDS.share + numPlayers) * 1e6 + r;
-    var g = newRound(seed, numPlayers);
-    var forks = 0;
+    var g = newRound(seed, numPlayers, opts.stack);
+    var forked = 0;
     playOut(g.state, g.rng, every, opts.victims, function (before, after, action) {
       var seat = before.currentPlayer;
       var offenderLeft = after.players[seat].hand.length;
@@ -175,21 +225,31 @@ function bluffShare(numPlayers, chance, opts) {
       var guilty = after.pendingChallenge.hadColorMatch;
       var victim = after.pendingChallenge.victim;
       var low = before.players[victim].hand.length <= 2;
-      add(t.all, guilty);
-      add(low ? t.low : t.high, guilty);
-      if (low) add(offenderLeft <= 2 ? t.off12 : offenderLeft <= 4 ? t.off34 : t.off5, guilty);
-      add(guilty ? t.sameBluff : t.sameHonest, action.chosenColor === before.currentColor);
-      if (opts.breakeven && low) {
+      /* An answer to a stack lands while the previous window is still open. */
+      var answer = !!before.pendingChallenge;
+      if (answer) {
+        add(t.stacked, guilty);
+        add(low ? t.stackedLow : t.stackedHigh, guilty);
+        if (guilty) add(t.stackedSame, action.chosenColor === before.currentColor);
+      } else {
+        add(t.all, guilty);
+        add(low ? t.low : t.high, guilty);
+        if (low) add(offenderLeft <= 2 ? t.off12 : offenderLeft <= 4 ? t.off34 : t.off5, guilty);
+        add(guilty ? t.sameBluff : t.sameHonest, action.chosenColor === before.currentColor);
+      }
+      if (opts.breakeven && (answer || low)) {
         /*
          * Both copies replay from one fork seed, so they differ only in
-         * the victim's answer. 64 forks per round is far above the most
-         * Wild Draw Fours a round can hold.
+         * the victim's answer.
          */
-        var forkSeed = (SEEDS.fork + numPlayers) * 1e8 + r * 64 + (forks++);
+        if (forked >= FORKS) throw new Error('more than ' + FORKS + ' forks in one round');
+        var forkSeed = (SEEDS.fork + numPlayers) * 1e8 + r * FORKS + (forked++);
         var accepted = playOut(E.applyDraw(after, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
         var challenged = playOut(E.applyChallenge(after, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
-        var d = (challenged.roundWinner === victim ? 1 : 0) - (accepted.roundWinner === victim ? 1 : 0);
-        (guilty ? t.fork.gain : t.fork.loss).push(d);
+        var bucket = answer ? t.fork.stacked : offenderLeft <= 4 ? t.fork.off14 : t.fork.off5;
+        var side = guilty ? bucket.guilty : bucket.honest;
+        side.wins.push((challenged.roundWinner === victim ? 1 : 0) - (accepted.roundWinner === victim ? 1 : 0));
+        side.pts.push(margin(challenged, victim) - margin(accepted, victim));
       }
     });
   }
@@ -202,10 +262,10 @@ function winRate(numPlayers, chance, opts) {
   for (var r = 0; r < opts.rounds; r++) {
     var bluffer = r % numPlayers;
     var seed = (SEEDS.winRate + numPlayers) * 1e6 + r;
-    var a = newRound(seed, numPlayers);
+    var a = newRound(seed, numPlayers, opts.stack);
     var won = playOut(a.state, a.rng, function (seat) { return seat === bluffer ? chance : 0; }, opts.victims)
       .roundWinner === bluffer ? 1 : 0;
-    var b = newRound(seed, numPlayers);
+    var b = newRound(seed, numPlayers, opts.stack);
     var wonAnyway = playOut(b.state, b.rng, function () { return 0; }, opts.victims).roundWinner === bluffer ? 1 : 0;
     wins += won;
     control += wonAnyway;
@@ -214,12 +274,34 @@ function winRate(numPlayers, chance, opts) {
   return { wins: wins, control: control, rounds: opts.rounds, diff: meanCI(diffs) };
 }
 
+/* G, L, break-even and the challenge-every-one mean for one yardstick. */
+function yardstick(f, key, scale, digits) {
+  var G = mean(f.guilty[key]), L = -mean(f.honest[key]);
+  function show(x) { return isFinite(x) ? (scale * x).toFixed(digits) : 'n/a'; }
+  /*
+   * The ratio only means something when a guilty verdict helps and an
+   * honest one hurts. Otherwise one answer is better whatever the share.
+   */
+  var be = !(isFinite(G) && isFinite(L)) ? 'n/a'
+    : L <= 0 ? 'always' : G <= 0 ? 'never' : (100 * L / (L + G)).toFixed(1) + '%';
+  return show(G).padStart(7) + show(L).padStart(7) + be.padStart(8) + '  ' +
+    meanCI(f.guilty[key].concat(f.honest[key]), scale).padEnd(25);
+}
+
+function forkRow(n, label, f, guilty) {
+  return String(n).padStart(7) + ' | ' + label.padEnd(15) + ' | ' +
+    String(guilty[1]).padStart(6) + ' ' + pct(guilty[0], guilty[1]) + ' | ' +
+    yardstick(f, 'wins', 100, 1) + ' | ' + yardstick(f, 'pts', 1, 1);
+}
+
 function main() {
   var opts = parseArgs(process.argv);
-  console.log('Rounds per table size: ' + opts.rounds + '. Challenge rule on, stacking off. Victims: ' +
+  console.log('Rounds per table size: ' + opts.rounds + '. Challenge rule on, stacking ' +
+    (opts.stack ? 'on' : 'off') + '. Victims: ' +
     { cpu: 'the CPU challenge rule', accept: 'always accept', challenge: 'always challenge' }[opts.victims] + '.');
   console.log('Guilty = the CPU held the color in play when it played the Wild Draw Four. Shares leave out');
-  console.log('Wild Draw Fours played as a last card, which are innocent by construction.');
+  console.log('Wild Draw Fours played as a last card, which are innocent by construction' +
+    (opts.stack ? ', and count answers to a stack apart.' : '.'));
   opts.chances.forEach(function (chance) {
     console.log('\ncpuBluffChance ' + chance);
     console.log('players | W+4 guilty (95% CI)          last card | victim 1-2: n  guilty | victim 3+: n  guilty |' +
@@ -236,6 +318,19 @@ function main() {
       );
       return { n: n, t: t };
     });
+    if (opts.stack) {
+      console.log('players | answers to a stack: n  per 100 rounds  guilty (95% CI)         | victim 1-2: n  guilty |' +
+        ' victim 3+: n  guilty | guilty ones re-declaring the color in play');
+      rows.forEach(function (row) {
+        var t = row.t;
+        console.log(String(row.n).padStart(7) + ' | ' + String(t.stacked[1]).padStart(21) + ' ' +
+          (100 * t.stacked[1] / opts.rounds).toFixed(1).padStart(15) + ' ' + pct(t.stacked[0], t.stacked[1]) + ' ' +
+          wilson(t.stacked[0], t.stacked[1]).padEnd(17) + ' | ' +
+          String(t.stackedLow[1]).padStart(12) + ' ' + pct(t.stackedLow[0], t.stackedLow[1]) + ' | ' +
+          String(t.stackedHigh[1]).padStart(11) + ' ' + pct(t.stackedHigh[0], t.stackedHigh[1]) + ' | ' +
+          pct(t.stackedSame[0], t.stackedSame[1]).padStart(42));
+      });
+    }
     if (chance > 0) {
       console.log('players | bluffer round wins   same seeds, nobody bluffing   difference in points (95% CI)');
       [2, 3, 4].forEach(function (n) {
@@ -245,16 +340,22 @@ function main() {
       });
     }
     if (opts.breakeven) {
-      console.log('players | victim 1-2: gain G if guilty (n)   loss L if honest (n)   break-even L/(L+G)   guilty share');
+      console.log('Challenge against accept, from the victim\'s side. Round wins in percentage points, points in card points.');
+      console.log('players | at victim 1-2   |      n guilty |      G      L   break  challenge every one (95% CI) |' +
+        '      G      L   break  challenge every one (95% CI)');
+      console.log('        |                 |               |  round wins                                       |' +
+        '  points');
       rows.forEach(function (row) {
-        var f = row.t.fork;
-        var G = f.gain.length ? f.gain.reduce(function (a, b) { return a + b; }, 0) / f.gain.length : NaN;
-        var L = f.loss.length ? -f.loss.reduce(function (a, b) { return a + b; }, 0) / f.loss.length : NaN;
-        var be = isFinite(G) && isFinite(L) ? (100 * L / (L + G)).toFixed(1) + '%' : 'n/a';
-        console.log(String(row.n).padStart(7) + ' | ' +
-          ((isFinite(G) ? (100 * G).toFixed(1) + ' pts' : 'n/a') + ' (' + f.gain.length + ')').padStart(32) + ' ' +
-          ((isFinite(L) ? (100 * L).toFixed(1) + ' pts' : 'n/a') + ' (' + f.loss.length + ')').padStart(21) + ' ' +
-          be.padStart(20) + ' ' + pct(row.t.low[0], row.t.low[1]).padStart(14));
+        var t = row.t, f = t.fork;
+        var off14 = [t.off12[0] + t.off34[0], t.off12[1] + t.off34[1]];
+        console.log(forkRow(row.n, 'offender 1-4', f.off14, off14));
+        console.log(forkRow(row.n, 'offender 5+', f.off5, t.off5));
+        var both = {
+          guilty: { wins: f.off14.guilty.wins.concat(f.off5.guilty.wins), pts: f.off14.guilty.pts.concat(f.off5.guilty.pts) },
+          honest: { wins: f.off14.honest.wins.concat(f.off5.honest.wins), pts: f.off14.honest.pts.concat(f.off5.honest.pts) }
+        };
+        console.log(forkRow(row.n, 'either', both, t.low));
+        if (opts.stack) console.log(forkRow(row.n, 'stack, any', f.stacked, t.stacked));
       });
     }
   });
