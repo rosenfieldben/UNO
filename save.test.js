@@ -345,7 +345,7 @@ test('storageFrom tolerates a missing or blocked localStorage', function () {
  * is not in the list.
  */
 var SAVED_SHAPE = {
-  version: 1,
+  version: 2,
   paths: [
     'challengeResult: null|object',
     'challengeResult.challenger: number',
@@ -356,6 +356,7 @@ var SAVED_SHAPE = {
     'challengeResult.offender: number',
     'config: object',
     'config.challengeRule: boolean',
+    'config.cpuBluffChance: number',
     'config.cpuForgetUnoChance: number',
     'config.numPlayers: number',
     'config.stackDraws: boolean',

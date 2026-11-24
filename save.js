@@ -33,7 +33,7 @@
    * migrated: losing a game in progress once is cheaper than restoring
    * one the current code misreads.
    */
-  var VERSION = 1;
+  var VERSION = 2;
 
   /*
    * localStorage is shared by every page on an origin. On GitHub Pages

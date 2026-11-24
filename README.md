@@ -35,6 +35,11 @@ it just cannot be resumed.
 - `index.html`, `style.css` - markup and card-table styling.
 - `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
   for the test suites.
+- `bench-bluff.js` - seeded all-CPU bench for Wild Draw Four bluffing:
+  the share of CPU Wild Draw Fours that are bluffs, split by the
+  victim's hand size, and how a bluffing CPU fares against ones that
+  never bluff. Run it with `node bench-bluff.js` (about a minute); it is
+  a measurement, not a test, and its name keeps it out of `node --test`.
 
 ## Tests
 
@@ -83,6 +88,22 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   own. No official rule covers the combination, so this is a house
   choice; with stacking off it reduces exactly to the official four and
   six.
+- With the challenge rule on, CPU players sometimes bluff: they play a
+  Wild Draw Four while still holding the color in play, which a
+  challenge would catch. They only bluff when the next player is down to
+  one or two cards, and then with probability `cpuBluffChance` (default
+  0.4). Challenging pays when more than a third of the Wild Draw Fours
+  you face are bluffs: a failed challenge costs six cards against four
+  for accepting, and 6 x (1 - g) < 4 when g > 1/3. Counting the four
+  cards a caught offender draws as a gain for you lowers that to a fifth.
+  `bench-bluff.js` measures the default at about one bluff in three for
+  a player holding one or two cards, and none at all for a player
+  holding three or more: a Wild Draw Four played at a bigger hand is
+  always honest. Bluffing only against a low hand is deliberate. When
+  the default was chosen, a version that also bluffed in ordinary play
+  lost two to three points of round win rate in the bench, because it
+  spends the Wild Draw Four too early; bluffing only against a low hand
+  costs nothing measurable.
 - Reverse acts as Skip in a two-player game.
 - Failing to call Uno before the next action costs two cards; in a
   two-player game an action card that hands you the turn straight back

@@ -184,6 +184,187 @@ test('plays out full games with the challenge rule on, legally at every step', f
   }
 });
 
+/* ----- Wild Draw Four bluffs ----- */
+
+/*
+ * Player 0 holds a Wild Draw Four and three red cards on a red 5, so a
+ * Wild Draw Four would be a bluff (red is in play) but red plays exist
+ * too: a real choice. oppCards sets the next player's hand size: the CPU
+ * only bluffs when that is 2 or fewer.
+ */
+function bluffChoice(chance, oppCards, rule) {
+  var hand = [card(null, 'wild4'), card('red', '3'), card('red', '4'), card('red', '6'),
+              card('green', '1'), card('green', '2'), card('yellow', '7')];
+  var g = makeGame([hand, FILLER1], card('red', '5'),
+    { challengeRule: rule !== false, cpuBluffChance: chance });
+  trimHand(g, 1, oppCards);
+  return g;
+}
+
+/* An rng that fails the test if anything draws from it. */
+function noRng() { throw new Error('the rng must not be drawn from here'); }
+
+test('bluffs at a low opponent exactly when the injected rng says so', function () {
+  var g = bluffChoice(0.5, 2);
+  var bluff = AI.chooseAction(g, 0, function () { return 0.1; });
+  assertEqual(g.players[0].hand[bluff.cardIndex].value, 'wild4', 'below the chance it bluffs');
+  var next = E.applyPlay(g, bluff, seededRng(1));
+  assertEqual(next.pendingChallenge.hadColorMatch, true, 'and the engine judges it guilty');
+  var honest = AI.chooseAction(g, 0, function () { return 0.9; });
+  assertEqual(g.players[0].hand[honest.cardIndex].color, 'red', 'above it the CPU plays red');
+});
+
+test('never bluffs in ordinary play, and rolls nothing there', function () {
+  /*
+   * bench-bluff.js found bluffs here cost the CPU win rate, so it only
+   * bluffs at an opponent holding 2 or fewer cards. Even at chance 1, a
+   * next player holding 3 or more never sees a bluff.
+   */
+  [3, 7].forEach(function (oppCards) {
+    var g = bluffChoice(1, oppCards);
+    var a = AI.chooseAction(g, 0, noRng);
+    assertEqual(g.players[0].hand[a.cardIndex].color, 'red', oppCards + ' cards');
+  });
+});
+
+test('a bluff never re-declares the color already in play', function () {
+  /* Red is the hand's longest color, so an honest pick would be red. */
+  var g = bluffChoice(1, 2);
+  var a = AI.chooseAction(g, 0, function () { return 0; });
+  assertEqual(g.players[0].hand[a.cardIndex].value, 'wild4');
+  assertEqual(a.chosenColor, 'green', 'the best color other than red');
+});
+
+test('cpuBluffChance 0 never bluffs and draws nothing from the rng', function () {
+  [2, 7].forEach(function (oppCards) {
+    var g = bluffChoice(0, oppCards);
+    var a = AI.chooseAction(g, 0, noRng);
+    assertEqual(g.players[0].hand[a.cardIndex].color, 'red', oppCards + ' cards');
+  });
+});
+
+test('with the challenge rule off nothing is a bluff and nothing is rolled', function () {
+  /* Even at chance 1: without the challenge a Wild Draw Four is just a card. */
+  var low = bluffChoice(1, 2, false);
+  var b = AI.chooseAction(low, 0, noRng);
+  assertEqual(low.players[0].hand[b.cardIndex].value, 'wild4', 'it punishes a low opponent as before');
+  assertEqual(b.chosenColor, 'red', 'declaring its best color, as before');
+});
+
+test('a forced Wild Draw Four is not a bluff decision and rolls nothing', function () {
+  /*
+   * Stacking and the challenge rule: player 1 answers a Wild Draw Four,
+   * so a Wild Draw Four is its only legal card. It holds green, the
+   * declared color, so playing it is guilty, but there is no choice.
+   * Player 0 is left with 2 cards, so this is exactly the low-opponent
+   * case where bluffs are rolled.
+   */
+  var hand1 = [card(null, 'wild4'), card('green', '1'), card('green', '2'), card('green', '3'),
+               card('blue', '1'), card('blue', '2'), card('blue', '3')];
+  var g = makeGame([[card(null, 'wild4')].concat(FILLER0.slice(0, 6)), hand1], card('red', '5'),
+    { challengeRule: true, stackDraws: true, cpuBluffChance: 1 });
+  trimHand(g, 0, 3);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'green' }, seededRng(9));
+  assertEqual(g2.players[0].hand.length, 2, 'the next player is low');
+  assertEqual(E.legalPlays(g2, 1).length, 1, 'only the answering Wild Draw Four is legal');
+  var a = AI.chooseAction(g2, 1, noRng);
+  assertEqual(g2.players[1].hand[a.cardIndex].value, 'wild4');
+});
+
+test('at a low opponent a Draw Two outranks any Wild Draw Four, and rolls nothing', function () {
+  /* Honest (rule off) or a possible bluff (rule on): the Draw Two goes first. */
+  [false, true].forEach(function (rule) {
+    var hand = [card(null, 'wild4'), card('red', 'draw2'), card('red', '3'), card('red', '4'),
+                card('green', '1'), card('green', '2'), card('yellow', '7')];
+    var g = makeGame([hand, FILLER1], card('red', '5'), { challengeRule: rule, cpuBluffChance: 1 });
+    trimHand(g, 1, 2);
+    var a = AI.chooseAction(g, 0, noRng);
+    assertEqual(g.players[0].hand[a.cardIndex].value, 'draw2', 'rule ' + (rule ? 'on' : 'off'));
+  });
+});
+
+/*
+ * Plays seeded all-CPU games and returns every decision as text, with
+ * the running count of rng draws, so two runs can be compared exactly.
+ */
+function decisionTrace(seed, config) {
+  var base = seededRng(seed), draws = 0;
+  function rng() { draws++; return base(); }
+  var s = E.createGame(config, rng), out = [];
+  for (var i = 0; i < 20000 && s.phase !== 'gameOver'; i++) {
+    if (s.phase === 'roundOver') { s = E.startNextRound(s, rng); continue; }
+    var seat = s.currentPlayer;
+    if (s.pendingChallenge && AI.decideChallenge(s, seat, rng)) {
+      s = E.applyChallenge(s, rng);
+      out.push('challenge@' + draws);
+      continue;
+    }
+    var a = AI.chooseAction(s, seat, rng);
+    out.push(JSON.stringify(a) + '@' + draws);
+    s = a.type === 'draw' ? E.applyDraw(s, rng) : E.applyPlay(s, a, rng);
+  }
+  return out.join('\n');
+}
+
+test('with the challenge rule off, cpuBluffChance changes no decision and no rng draw', function () {
+  /* So every seeded game without the rule replays exactly as before. */
+  for (var seed = 1; seed <= 15; seed++) {
+    var config = { numPlayers: 2 + (seed % 3), targetScore: 200, stackDraws: seed % 2 === 0 };
+    var never = decisionTrace(seed, Object.assign({ cpuBluffChance: 0 }, config));
+    var always = decisionTrace(seed, Object.assign({ cpuBluffChance: 1 }, config));
+    assert(never === always, 'seed ' + seed + ': the game changed');
+  }
+});
+
+test('across seeded games, chance 1 bluffs at every opportunity and chance 0 at none', function () {
+  /*
+   * An opportunity is a turn where the CPU could choose to bluff: the
+   * next player holds 2 or fewer cards, no Draw Two is legal (it would
+   * outrank any Wild Draw Four), a legal Wild Draw Four, the color in
+   * play in hand, another legal play, and no just-drawn card to play.
+   * Counting them independently of the AI checks that the roll sits
+   * exactly where the rule says. Any Wild Draw Four the CPU chooses
+   * while holding the color against a next player with 3 or more cards
+   * is counted too: that must never happen.
+   */
+  function count(chance) {
+    var t = { chances: 0, bluffs: 0, ordinaryBluffs: 0 };
+    for (var seed = 1; seed <= 80; seed++) {
+      var rng = seededRng(seed);
+      var s = E.createGame({ numPlayers: 2 + (seed % 3), targetScore: 200,
+        challengeRule: true, cpuBluffChance: chance }, rng);
+      for (var i = 0; i < 20000 && s.phase !== 'gameOver'; i++) {
+        if (s.phase === 'roundOver') { s = E.startNextRound(s, rng); continue; }
+        var seat = s.currentPlayer;
+        if (s.pendingChallenge && AI.decideChallenge(s, seat, rng)) { s = E.applyChallenge(s, rng); continue; }
+        var plays = E.legalPlays(s, seat);
+        var hasWild4 = plays.some(function (p) { return p.card.value === 'wild4'; });
+        var hasOther = plays.some(function (p) { return p.card.value !== 'wild4'; });
+        /* A round opened on a flipped Wild has no color in play to hold. */
+        var holdsColor = s.currentColor !== null &&
+          s.players[seat].hand.some(function (c) { return c.color === s.currentColor; });
+        var low = s.players[E.playerAfter(s, seat, 1)].hand.length <= 2;
+        var hasDraw2 = plays.some(function (p) { return p.card.value === 'draw2'; });
+        var a = AI.chooseAction(s, seat, rng);
+        var playedWild4 = a.type === 'play' && s.players[seat].hand[a.cardIndex].value === 'wild4';
+        var choice = !s.pendingDraw && hasWild4 && hasOther && holdsColor;
+        if (choice && low && !hasDraw2) {
+          t.chances++;
+          if (playedWild4) t.bluffs++;
+        }
+        if (choice && !low && playedWild4) t.ordinaryBluffs++;
+        s = a.type === 'draw' ? E.applyDraw(s, rng) : E.applyPlay(s, a, rng);
+      }
+    }
+    return t;
+  }
+  var none = count(0), all = count(1);
+  assert(none.chances > 50 && all.chances > 50, 'expected many opportunities, got ' + all.chances);
+  assertEqual(none.bluffs, 0, 'chance 0');
+  assertEqual(all.bluffs, all.chances, 'chance 1');
+  assertEqual(all.ordinaryBluffs, 0, 'chance 1 never bluffs in ordinary play');
+});
+
 /* ----- legality soak: thousands of seeded random states ----- */
 
 test('never returns an illegal action across thousands of game states', function () {
