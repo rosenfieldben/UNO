@@ -198,8 +198,9 @@
        * tuned, a scratch version (not committed) that also bluffed in
        * ordinary play lost 2 to 3 points of round win rate in
        * bench-bluff.js at chance 0.2, because it spends the Wild Draw
-       * Four long before it matters; bluffing only here costs far less
-       * (the bench's win-rate pass measures it). The price is a tell, by
+       * Four long before it matters. Bluffing only here, at the default
+       * chance, costs nothing measurable against the same seeds played
+       * without it (the bench's win-rate pass). The price is a tell, by
        * deliberate choice: with stacking off, a Wild Draw Four played at
        * someone holding three or more cards is never a chosen bluff.
        *
