@@ -216,15 +216,30 @@ test('bluffs at a low opponent exactly when the injected rng says so', function 
 
 test('never bluffs in ordinary play, and rolls nothing there', function () {
   /*
-   * bench-bluff.js found bluffs here cost the CPU win rate, so it only
-   * bluffs at an opponent holding 2 or fewer cards. Even at chance 1, a
-   * next player holding 3 or more never sees a bluff.
+   * Bluffing in ordinary play cost the CPU win rate when this was tuned,
+   * so it only bluffs at an opponent holding 2 or fewer cards. Even at
+   * chance 1, a next player holding 3 or more never sees a chosen bluff.
    */
   [3, 7].forEach(function (oppCards) {
     var g = bluffChoice(1, oppCards);
     var a = AI.chooseAction(g, 0, noRng);
     assertEqual(g.players[0].hand[a.cardIndex].color, 'red', oppCards + ' cards');
   });
+});
+
+test('an honest Wild Draw Four at a low opponent is always played and rolls nothing', function () {
+  /*
+   * No red in hand on a red 5, so the Wild Draw Four is honest. The roll
+   * is only for plays that would be a bluff; an honest one goes out as
+   * it always did, even at chance 1 and with the rule on.
+   */
+  var hand = [card(null, 'wild4'), card('yellow', '5'), card('green', '1'), card('green', '2'),
+              card('blue', '1'), card('blue', '2'), card('yellow', '7')];
+  var g = makeGame([hand, FILLER1], card('red', '5'), { challengeRule: true, cpuBluffChance: 1 });
+  trimHand(g, 1, 2);
+  var a = AI.chooseAction(g, 0, noRng);
+  assertEqual(g.players[0].hand[a.cardIndex].value, 'wild4');
+  assert(a.chosenColor !== 'red', 'an honest player holds no red to declare');
 });
 
 test('a bluff never re-declares the color already in play', function () {
@@ -307,7 +322,7 @@ function decisionTrace(seed, config) {
 }
 
 test('with the challenge rule off, cpuBluffChance changes no decision and no rng draw', function () {
-  /* So every seeded game without the rule replays exactly as before. */
+  /* So cpuBluffChance cannot change a game played without the rule. */
   for (var seed = 1; seed <= 15; seed++) {
     var config = { numPlayers: 2 + (seed % 3), targetScore: 200, stackDraws: seed % 2 === 0 };
     var never = decisionTrace(seed, Object.assign({ cpuBluffChance: 0 }, config));

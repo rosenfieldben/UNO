@@ -191,24 +191,26 @@
       /*
        * With the challenge rule on, a Wild Draw Four played while holding
        * the color in play is a bluff: legal, but a challenge would catch
-       * it. A CPU that never bluffs turns every challenge into a sure
-       * loss of six cards, so here it bluffs with probability
-       * cpuBluffChance.
+       * it. A CPU that never bluffs makes every challenge an almost sure
+       * loss, so here it bluffs with probability cpuBluffChance.
        *
        * Only here, against an opponent about to go out. When this was
-       * tuned, a version that also bluffed in ordinary play lost 2 to 3
-       * points of round win rate in bench-bluff.js, because it spends
-       * the Wild Draw Four long before it matters; bluffing only here
-       * cost nothing measurable. The price is a tell, and the owner
-       * chose it: a Wild Draw Four played at someone holding three or
-       * more cards is never a bluff.
+       * tuned, a scratch version (not committed) that also bluffed in
+       * ordinary play lost 2 to 3 points of round win rate in
+       * bench-bluff.js at chance 0.2, because it spends the Wild Draw
+       * Four long before it matters; bluffing only here costs far less
+       * (the bench's win-rate pass measures it). The price is a tell, by
+       * deliberate choice: with stacking off, a Wild Draw Four played at
+       * someone holding three or more cards is never a chosen bluff.
        *
        * The roll happens only when it decides something: the Wild Draw
-       * Four would be a bluff and another legal play exists. A forced
-       * one (the only legal card) rolls nothing. Neither does anything
-       * with the rule off, where nothing is a bluff, so play there is
-       * exactly as before. Declining is always safe, since it only
-       * happens when another legal play exists.
+       * Four would be a bluff and another legal play exists. With the
+       * rule off nothing is a bluff and nothing is rolled, so play there
+       * is exactly as before. A Wild Draw Four that is the only legal
+       * card, as when answering a stacked one, is not a bluff decision
+       * either: the CPU plays it as it always did, guilty or not.
+       * Declining is always safe, since it only happens when another
+       * legal play exists.
        */
       if (wild4) {
         var wouldBluff = state.config.challengeRule && holdsActiveColor(state, playerIndex);
