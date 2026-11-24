@@ -9,7 +9,9 @@
  *
  * No saved string is pinned here. Each test builds its saves through
  * encode or from VERSION, so the tests describe the rules for accepting
- * a save rather than freezing one particular encoding.
+ * a save rather than freezing one particular encoding. The one thing
+ * pinned on purpose is the saved shape at the end of this file, which
+ * exists to fail when the state changes without a VERSION bump.
  */
 'use strict';
 
@@ -321,6 +323,147 @@ test('storageFrom tolerates a missing or blocked localStorage', function () {
     get: function () { throw new Error('SecurityError: access denied'); }
   });
   assertEqual(S.storageFrom(blocked), null);
+});
+
+/* ----- the saved shape, pinned to VERSION ----- */
+
+/*
+ * Every field path a saved state can have, with the types seen there,
+ * pinned for the current VERSION. validateState checks the cards and the
+ * seats, not which fields exist, so without this a field could be added,
+ * dropped, renamed, or retyped while old saves kept loading without it.
+ * When this fails, the state changed shape: bump VERSION in save.js, then
+ * set version and paths here to match (the failure prints the new list).
+ * Change both together. Editing the list without bumping VERSION defeats
+ * the point, since old saves would then load against the new shape.
+ *
+ * What it cannot catch: a field that keeps its name and type but changes
+ * meaning, such as a number that counted cards and now counts points, or
+ * a chance that flips from "forget" to "remember". Whoever changes what a
+ * field means must bump VERSION themselves. It also pins only the types
+ * the games below reach; a type that only an unplayed situation produces
+ * is not in the list.
+ */
+var SAVED_SHAPE = {
+  version: 1,
+  paths: [
+    'challengeResult: null|object',
+    'challengeResult.challenger: number',
+    'challengeResult.color: null|string',
+    'challengeResult.colorMatches: number',
+    'challengeResult.drew: number',
+    'challengeResult.guilty: boolean',
+    'challengeResult.offender: number',
+    'config: object',
+    'config.challengeRule: boolean',
+    'config.cpuForgetUnoChance: number',
+    'config.numPlayers: number',
+    'config.stackDraws: boolean',
+    'config.targetScore: number',
+    'currentColor: null|string',
+    'currentPlayer: number',
+    'direction: number',
+    'discardPile: array',
+    'discardPile[]: object',
+    'discardPile[].color: null|string',
+    'discardPile[].value: string',
+    'drawPile: array',
+    'drawPile[]: object',
+    'drawPile[].color: null|string',
+    'drawPile[].value: string',
+    'gameWinner: null',
+    'pendingChallenge: null|object',
+    'pendingChallenge.amount: number',
+    'pendingChallenge.color: null|string',
+    'pendingChallenge.colorMatches: number',
+    'pendingChallenge.hadColorMatch: boolean',
+    'pendingChallenge.offender: number',
+    'pendingChallenge.victim: number',
+    'pendingDraw: null|object',
+    'pendingDraw.cardIndex: number',
+    'pendingDrawCount: number',
+    'pendingDrawValue: null|string',
+    'phase: string',
+    'players: array',
+    'players[]: object',
+    'players[].calledUno: boolean',
+    'players[].hand: array',
+    'players[].hand[]: object',
+    'players[].hand[].color: null|string',
+    'players[].hand[].value: string',
+    'players[].isHuman: boolean',
+    'players[].score: number',
+    'round: number',
+    'roundPoints: number',
+    'roundWinner: null|number',
+    'unoPenalty: null|object',
+    'unoPenalty.drew: number',
+    'unoPenalty.player: number',
+    'unoPending: null|number'
+  ]
+};
+
+function typeName(value) {
+  return value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+}
+
+/* Records every path under value, with each type seen at it. */
+function collectShape(value, path, out) {
+  var type = typeName(value);
+  if (path) (out[path] = out[path] || {})[type] = true;
+  if (type === 'array') value.forEach(function (item) { collectShape(item, path + '[]', out); });
+  if (type === 'object') {
+    Object.keys(value).forEach(function (k) { collectShape(value[k], path ? path + '.' + k : k, out); });
+  }
+}
+
+/*
+ * The shape of every state a game can save, gathered from seeded games
+ * across table sizes and rules. Game-over states are left out because
+ * persist never saves one. Random play rarely puts a Wild Draw Four on
+ * a flipped Wild, so one game is dealt to do exactly that: it is what
+ * shows a challenge's color can be null.
+ */
+function observedShape() {
+  var out = {};
+  function record(s) { if (s.phase !== 'gameOver') collectShape(s, '', out); }
+  for (var seed = 600; seed < 640; seed++) {
+    var rng = seededRng(seed);
+    var s = E.createGame({
+      numPlayers: 2 + (seed % 3), targetScore: 150,
+      challengeRule: seed % 2 === 0, stackDraws: seed % 4 < 2
+    }, rng);
+    record(s);
+    for (var i = 0; i < 20000 && s.phase !== 'gameOver'; i++) {
+      s = step(s, rng);
+      record(s);
+    }
+  }
+  var hands = [[U.card(null, 'wild4')].concat(U.FILLER[0].slice(0, 6)), U.FILLER[1]];
+  var g = U.makeGame(hands, U.card(null, 'wild'), { challengeRule: true });
+  record(g);
+  g = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'red' }, seededRng(1));
+  record(g);
+  record(E.applyChallenge(g, seededRng(2)));
+  return Object.keys(out).sort().map(function (p) { return p + ': ' + Object.keys(out[p]).sort().join('|'); });
+}
+
+test('the saved shape is the one pinned for VERSION', function () {
+  var observed = observedShape();
+  var added = observed.filter(function (line) { return SAVED_SHAPE.paths.indexOf(line) === -1; });
+  var gone = SAVED_SHAPE.paths.filter(function (line) { return observed.indexOf(line) === -1; });
+  if (S.VERSION === SAVED_SHAPE.version && !added.length && !gone.length) return;
+  throw new Error([
+    S.VERSION !== SAVED_SHAPE.version
+      ? 'save.js is at VERSION ' + S.VERSION + ' but SAVED_SHAPE is pinned for VERSION ' + SAVED_SHAPE.version +
+        '. Set SAVED_SHAPE.version to ' + S.VERSION + ' and SAVED_SHAPE.paths to the current shape below.'
+      : 'The saved state changed shape but VERSION is still ' + S.VERSION + '. Bump VERSION in save.js, ' +
+        'then set SAVED_SHAPE.version to it and SAVED_SHAPE.paths to the current shape below.',
+    added.length ? 'New or retyped: ' + added.join('; ') : '',
+    gone.length ? 'Gone: ' + gone.join('; ') + ' (if a field still exists, the games above may no longer reach it)' : '',
+    'Current shape:',
+    observed.map(function (line) { return "    '" + line + "',"; }).join('\n')
+  ].filter(Boolean).join('\n'));
 });
 
 run();
