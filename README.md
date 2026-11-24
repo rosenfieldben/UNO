@@ -13,14 +13,25 @@ your call window). If a CPU forgets to call Uno, hit Catch! before the
 next player acts. With the challenge rule switched on, a Wild Draw Four
 played at you waits for Challenge! or Take 4 before anything is drawn.
 
+The game saves itself in the browser after every move, so a refresh or a
+closed tab picks up where you left off. New game, or the end of a game,
+discards the save. If the browser blocks storage, the game still plays;
+it just cannot be resumed.
+
 ## Layout
 
 - `engine.js` - pure rules engine: plain state object in, new state out,
   all randomness through an injected rng. Runs under node with no DOM.
 - `ai.js` - pure CPU decision functions `chooseAction(state, playerIndex, rng)`
   and `decideChallenge(state, playerIndex, rng)`.
+- `save.js` - save and resume, pure apart from the storage it is handed:
+  encodes the engine state with a version number, and restores it only
+  when the version matches and `validateState` finds nothing wrong.
+  Every storage call is wrapped, so a missing, blocked, or full
+  localStorage cannot break play.
 - `ui.js` - the only file that touches the DOM; mutates state exclusively
-  through engine functions.
+  through engine functions, or restores a game saved earlier through
+  `save.js`, and saves every state it adopts.
 - `index.html`, `style.css` - markup and card-table styling.
 - `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
   for the test suites.
