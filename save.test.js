@@ -203,6 +203,29 @@ test('persist then load returns the game in progress', function () {
   assert(same(S.load(store), g), 'loaded state differs');
 });
 
+test('a stacking game saved mid-stack comes back owing the same total', function () {
+  /*
+   * Stacking reached the setup screen after saves existed, without a new
+   * field in the state or its config, so the saved shape and VERSION are
+   * unchanged (the tripwire below would say otherwise). What is new is a
+   * save taken while a total waits outside any challenge window, under
+   * both kinds of stack, which must come back owing the same cards.
+   */
+  ['draw2', 'wild4'].forEach(function (value) {
+    var store = memoryStorage();
+    var g = playUntil(1, { numPlayers: 3, stackDraws: true, challengeRule: true }, function (s) {
+      return s.phase === 'playing' && !s.pendingChallenge && s.pendingDrawValue === value && s.pendingDrawCount > 4;
+    });
+    assertEqual(g.pendingDrawValue, value, 'precondition: a ' + value + ' stack above four');
+    assertEqual(S.persist(store, g), true);
+    var back = S.load(store);
+    assert(same(back, g), value + ': loaded state differs');
+    var taken = E.applyDraw(back, seededRng(3));
+    assertEqual(taken.players[g.currentPlayer].hand.length - g.players[g.currentPlayer].hand.length,
+      g.pendingDrawCount, value + ': the whole total is owed after loading');
+  });
+});
+
 test('the newest persist wins', function () {
   var store = memoryStorage();
   var rng = seededRng(8);
