@@ -145,8 +145,9 @@
      * A challenge window freezes the hand: the victim owes a decision
      * (applyChallenge, or applyDraw to accept) before anything else can
      * happen. The stacking house rule adds a third option, answering
-     * with another Wild Draw Four, which the branch below already
-     * expresses since it allows exactly the cards matching
+     * with another Wild Draw Four, which closes the window without
+     * opening one of its own (see applyCardEffect). The branch below
+     * already expresses it, since it allows exactly the cards matching
      * pendingDrawValue.
      *
      * An offender who played their last card is the exception: the round
@@ -272,7 +273,18 @@
         forceDraw(state, 2, 'draw2', rng);
         break;
       case 'wild4':
-        if (state.config.challengeRule) {
+        /*
+         * Only a Wild Draw Four played on an ordinary turn can be
+         * challenged. One played to answer a stack was the only kind of
+         * card its player was allowed to play, so whether they still held
+         * the color in play says nothing about a bluff, and judging it on
+         * that would punish them for holding a card they could not play.
+         * It adds its four to the total instead, exactly as a Draw Two
+         * answering a Draw Two does. A total is pending exactly when this
+         * card answers one, since under stacking a pending total admits
+         * nothing but cards of its own value.
+         */
+        if (state.config.challengeRule && state.pendingDrawCount === 0) {
           openChallenge(state, priorColor);
         } else {
           forceDraw(state, 4, 'wild4', rng);
@@ -624,6 +636,12 @@
     next.discardPile.push(played);
     next.currentColor = isWild(played) ? action.chosenColor : played.color;
     next.pendingDraw = null;
+    /*
+     * A play inside a challenge window can only be an answer to it under
+     * the stacking house rule, and answering gives up the challenge: the
+     * window closes, and its four ride on in the total.
+     */
+    next.pendingChallenge = null;
 
     player.calledUno = false;
     if (player.hand.length === 1) {

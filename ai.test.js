@@ -270,9 +270,10 @@ test('a forced Wild Draw Four is not a bluff decision and rolls nothing', functi
   /*
    * Stacking and the challenge rule: player 1 answers a Wild Draw Four,
    * so a Wild Draw Four is its only legal card. It holds green, the
-   * declared color, so playing it is guilty, but there is no choice.
-   * Player 0 is left with 2 cards, so this is exactly the low-opponent
-   * case where bluffs are rolled.
+   * declared color, which on an ordinary turn would make the play a
+   * bluff, but an answer is never judged on color, so there is nothing
+   * to decide. Player 0 is left with 2 cards, so this is exactly the
+   * low-opponent case where bluffs are rolled.
    */
   var hand1 = [card(null, 'wild4'), card('green', '1'), card('green', '2'), card('green', '3'),
                card('blue', '1'), card('blue', '2'), card('blue', '3')];
@@ -284,6 +285,7 @@ test('a forced Wild Draw Four is not a bluff decision and rolls nothing', functi
   assertEqual(E.legalPlays(g2, 1).length, 1, 'only the answering Wild Draw Four is legal');
   var a = AI.chooseAction(g2, 1, noRng);
   assertEqual(g2.players[1].hand[a.cardIndex].value, 'wild4');
+  assertEqual(E.applyPlay(g2, a, seededRng(9)).pendingChallenge, null, 'and the answer opens no window');
 });
 
 test('at a low opponent a Draw Two outranks any Wild Draw Four, and rolls nothing', function () {
