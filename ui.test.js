@@ -169,6 +169,17 @@ test('Start Game passes the stacking box to the engine', function () {
   assertEqual(savedState(on).config.stackDraws, true, 'ticked');
 });
 
+test('a stacking game that opens on a Draw Two asks the human what to do', function () {
+  /* Under seed 20 the first flip is a Draw Two and the human leads. */
+  var storage = memoryStorage();
+  var el = openPage(storage, 20);
+  el('stack-draws').checked = true;
+  el('start-button').click();
+  assertEqual(savedState(storage).pendingDrawCount, 2, 'precondition: the flip left two owed');
+  assertEqual(el('message-bar').textContent, 'Answer with a Draw Two, or take 2?');
+  assert(!el('accept-button').classList.contains('hidden'), 'Take is offered from the first move');
+});
+
 test('a total the human owes is shown, with Take, and the pile does not take it', function () {
   var storage = memoryStorage();
   var el = facingStack(storage, U.FILLER[0]);
@@ -182,6 +193,10 @@ test('a total the human owes is shown, with Take, and the pile does not take it'
   var before = storage.items[S.KEY];
   el('draw-pile').click();
   assertEqual(storage.items[S.KEY], before, 'a tap on the pile changes nothing');
+  assertEqual(el('message-bar').textContent, 'You have no Draw Two to answer with: take 2.');
+  el('message-bar').textContent = '';
+  el('human-hand').children[0].click();
+  assertEqual(storage.items[S.KEY], before, 'nor does a tap on a card that cannot answer');
   assertEqual(el('message-bar').textContent, 'You have no Draw Two to answer with: take 2.');
 
   el('accept-button').click();
@@ -199,6 +214,7 @@ test('answering a stack passes it on, and a CPU that takes it is narrated as a t
   assertEqual(el('message-bar').textContent, 'Welcome back. Answer with a Draw Two, or take 2?');
   el('human-hand').children[0].click();
   assertEqual(el('message-bar').textContent, 'You play green +2.');
+  assert(!el('pending-total').classList.contains('hidden'), 'the total stays on the table while CPU 1 owes it');
   assertEqual(el('pending-total').textContent, '+4', 'the total grew and waits on CPU 1');
   assert(el('accept-button').classList.contains('hidden'), 'Take is the human\'s button only');
 

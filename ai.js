@@ -211,12 +211,16 @@
        * Four would be a bluff and another legal play exists. With the
        * rule off nothing is a bluff and nothing is rolled, so play there
        * is exactly as before. A Wild Draw Four that is the only legal
-       * card is not a bluff decision either. Answering a stack it cannot
-       * be a bluff, since an answer is never judged on color (see
-       * applyCardEffect in engine.js); on an ordinary turn it is the only
-       * legal card only when no card of the color in play is held, which
-       * makes it honest. Declining is always safe, since it only happens
-       * when another legal play exists.
+       * card is not a bluff decision either, and the CPU plays it as it
+       * always did. Answering a stack it cannot be a bluff, since an
+       * answer is never judged on color (see applyCardEffect in
+       * engine.js). On an ordinary turn it is the only legal card only
+       * when no card of the color in play is held as the CPU decides, but
+       * the engine judges the hand as the card lands: in a two-player
+       * game a Skip or Reverse can hand the turn back to a CPU that forgot
+       * Uno, and the penalty cards dealt in the same move may hold the
+       * color. Declining is always safe, since it only happens when
+       * another legal play exists.
        */
       if (wild4) {
         var wouldBluff = state.config.challengeRule && holdsActiveColor(state, playerIndex);

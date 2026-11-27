@@ -66,14 +66,14 @@ test('owed is the total the player on turn must answer or take', function () {
 
 test('a Wild Draw Four window asks to challenge or take', function () {
   var g = wild4AtHuman();
-  assertEqual(N.prompt(g), 'Challenge it, or take 4?');
+  assertEqual(N.prompt(g), 'Challenge the Wild Draw Four, or take 4?');
 });
 
 test('under stacking the window also offers an answer, but only with a Wild Draw Four in hand', function () {
   var cfg = { challengeRule: true, stackDraws: true };
   assertEqual(N.prompt(wild4AtHuman([card(null, 'wild4')], cfg)),
-    'Challenge it, answer with a Wild Draw Four, or take 4?');
-  assertEqual(N.prompt(wild4AtHuman([], cfg)), 'Challenge it, or take 4?');
+    'Challenge the Wild Draw Four, answer with your own, or take 4?');
+  assertEqual(N.prompt(wild4AtHuman([], cfg)), 'Challenge the Wild Draw Four, or take 4?');
 });
 
 test('no answer is offered to an offender who played their last card', function () {
@@ -83,7 +83,7 @@ test('no answer is offered to an offender who played their last card', function 
   U.trimHand(g, 1, 1);
   var g2 = play(play(g, 0, 0), 1, 0, 'green');
   assertEqual(g2.players[1].hand.length, 0, 'precondition: CPU 1 went out on it');
-  assertEqual(N.prompt(g2), 'Challenge it, or take 4?');
+  assertEqual(N.prompt(g2), 'Challenge the Wild Draw Four, or take 4?');
 });
 
 test('a stack asks to answer or take, or says plainly that it must be taken', function () {
@@ -115,7 +115,7 @@ test('a blocked tap points at the decision owed, whatever was tapped', function 
   var g = draw2Flip(FILLER[0]);
   assertEqual(N.blockedNote(g, 'pile'), 'You have no Draw Two to answer with: take 2.');
   assertEqual(N.blockedNote(g, 'card'), 'You have no Draw Two to answer with: take 2.');
-  assertEqual(N.blockedNote(wild4AtHuman(), 'pile'), 'Challenge it, or take 4?');
+  assertEqual(N.blockedNote(wild4AtHuman(), 'pile'), 'Challenge the Wild Draw Four, or take 4?');
 });
 
 test('otherwise a blocked tap explains the drawn card or the mismatch', function () {
@@ -180,18 +180,36 @@ test("an Uno penalty dealt in the same move is not counted as the draw", functio
   /*
    * Two players: the human's Skip leaves them one card without a call
    * and hands them the turn straight back, so their own draw is the
-   * action that enforces the penalty on them.
+   * action that enforces the penalty on them. With one card left to
+   * draw and one to recycle, the penalty takes both and the draw itself
+   * finds nothing, so the hand grew by two yet nothing was drawn.
    */
   var hand0 = [card('red', 'skip'), card('green', '9')].concat(FILLER[0].slice(0, 5));
   var g = makeGame([hand0, FILLER[1]], card('red', '5'));
   U.trimHand(g, 0, 2);
-  var g2 = toTop(toTop(toTop(play(g, 0, 0, undefined, false), card('blue', '9')), card('blue', '8')), card('blue', '7'));
+  var g2 = nearlyEmptyPiles(play(g, 0, 0, undefined, false), 1);
   assertEqual(g2.currentPlayer, 0, 'precondition: the Skip handed the turn back');
   var after = E.applyDraw(g2, seededRng(9));
   assertEqual(after.unoPenalty.player, 0);
   assertEqual(after.unoPenalty.drew, 2);
-  assertEqual(N.drawNote(g2, after), 'You draw a card; turn passes.');
-  assertEqual(N.message(after, N.drawNote(g2, after)), 'You missed UNO and draw 2! You draw a card; turn passes.');
+  assertEqual(after.players[0].hand.length - g2.players[0].hand.length, 2, 'precondition: only the penalty arrived');
+  assertEqual(N.drawNote(g2, after), 'No cards left to draw; turn passes.');
+  assertEqual(N.message(after, N.drawNote(g2, after)), 'You missed UNO and draw 2! No cards left to draw; turn passes.');
+});
+
+test("a penalty on someone else does not shrink a take", function () {
+  /*
+   * The human plays a Draw Two as their second to last card without
+   * calling Uno, and CPU 1's take is the action that enforces it. The
+   * two penalty cards are the human's, not CPU 1's.
+   */
+  var hand0 = [card('red', 'draw2'), card('green', '9')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { stackDraws: true });
+  U.trimHand(g, 0, 2);
+  var g2 = play(g, 0, 0, undefined, false);
+  var after = E.applyDraw(g2, seededRng(9));
+  assertEqual(after.unoPenalty.player, 0, 'precondition: the penalty fell on the human');
+  assertEqual(N.drawNote(g2, after), 'CPU 1 takes 2.');
 });
 
 /* ----- challenges and penalties ----- */
@@ -224,7 +242,7 @@ test('a message joins the move, the verdict, and what the human owes next', func
   var g2 = play(g, 0, 0);
   var action = { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'green' };
   var g3 = E.applyPlay(g2, action, seededRng(9));
-  assertEqual(N.message(g3, N.playNote(g2, action)), 'CPU 1 plays wild +4, choosing green. Challenge it, or take 4?');
+  assertEqual(N.message(g3, N.playNote(g2, action)), 'CPU 1 plays wild +4, choosing green. Challenge the Wild Draw Four, or take 4?');
   var g4 = E.applyChallenge(g3, seededRng(9));
   assertEqual(N.message(g4, N.challengeCall(0)),
     'You challenge the Wild Draw Four. Challenge failed: CPU 1 held no red. You draw 6.');

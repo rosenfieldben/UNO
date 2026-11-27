@@ -66,10 +66,14 @@
     if (!total || state.currentPlayer !== 0) return '';
     var canAnswer = E.legalPlays(state, 0).length > 0;
     var card = VALUE_NAME[state.pendingDrawValue];
+    /*
+     * The question can stand alone, on a reload or after a blocked tap,
+     * so it names the card rather than saying "it".
+     */
     if (state.pendingChallenge) {
       return canAnswer
-        ? 'Challenge it, answer with a ' + card + ', or take ' + total + '?'
-        : 'Challenge it, or take ' + total + '?';
+        ? 'Challenge the Wild Draw Four, answer with your own, or take ' + total + '?'
+        : 'Challenge the Wild Draw Four, or take ' + total + '?';
     }
     return canAnswer
       ? 'Answer with a ' + card + ', or take ' + total + '?'

@@ -11,11 +11,12 @@ the target score, then play: click a card to play it, click the draw pile
 to draw, and use the UNO! button when you are down to two cards (or during
 your call window). If a CPU forgets to call Uno, hit Catch! before the
 next player acts. With the challenge rule switched on, a Wild Draw Four
-played at you waits for Challenge! or Take 4 before anything is drawn.
-With stacking switched on, a Draw Two or Wild Draw Four played at you
-can be answered with the same card from your hand, which passes the
-total on. The total waiting on whoever is to move shows on the table,
-and when it is yours, Take N takes it.
+played at you on an ordinary turn waits for Challenge! or Take 4 before
+anything is drawn. With stacking switched on, a Draw Two or Wild Draw
+Four played at you can be answered with the same card from your hand,
+which passes the total on; an answer can never be challenged. The
+total waiting on whoever is to move shows on the table, and when it is
+yours, Take N takes it.
 
 The game saves itself in the browser after every move, so a refresh or a
 closed tab picks up where you left off. New game, or the end of a game,
@@ -134,17 +135,20 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   of three or more a CPU Wild Draw Four is never a chosen bluff, so
   accepting is right. With stacking on, accepting stays right in the
   same cases, but challenging a CPU left with five or more is no longer
-  a clear gain (+1.4, +0.5 and 0.0 points of round wins at two, three
-  and four players, none clear of zero), because not challenging then
-  includes answering with your own Wild Draw Four when you hold one.
+  a clear gain in round wins (+1.4, +0.5 and 0.0 points at two, three
+  and four players, none clear of zero). In card points it still pays
+  at two players (+4.2) but not clearly at three or four (+1.7 and
+  -0.8, both ranges spanning zero). Not challenging then includes
+  answering with your own Wild Draw Four when you hold one.
 - Tells. A player can read some of this from the table. Besides your own
   hand size, the offender's matters most: at the default, a Wild Draw
   Four from a CPU left with one or two cards is a bluff about 3% of the
   time, against about a quarter of the time from one holding five or
   more (25 to 28%), since a big hand is likely to still hold the color
-  in play. A
-  bluffing CPU never re-declares the color already in play, so that
-  gives nothing away.
+  in play. A chosen bluff never re-declares the color already in play,
+  so that gives nothing away. The rare guilty play that does, about 1%
+  of them in a two-player game, is a CPU whose own missed-Uno penalty,
+  dealt in the same move, handed it the color.
 - Reverse acts as Skip in a two-player game.
 - Failing to call Uno before the next action costs two cards; in a
   two-player game an action card that hands you the turn straight back

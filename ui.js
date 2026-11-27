@@ -7,8 +7,10 @@
  * state, so the screen can never drift from the rules. The one other
  * way in is a game restored by save.js, which validates it first. Every
  * state the UI adopts is handed back to save.js, so a reload resumes it.
- * The words in the message bar come from narrate.js, which reads them
- * off the engine states; this file only decides when to show them.
+ * The words for moves, takes, challenges and what the human owes come
+ * from narrate.js, which reads them off the engine states; this file
+ * decides when to show them, and keeps only short fixed lines such as
+ * a round starting or a caught Uno.
  */
 (function () {
   'use strict';
