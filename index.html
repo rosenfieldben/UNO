@@ -35,6 +35,11 @@
       <input id="challenge-rule" type="checkbox">
       <span class="hint">Wild Draw Four can be challenged</span>
     </div>
+    <div class="setup-row">
+      <label for="stack-draws">Stacking</label>
+      <input id="stack-draws" type="checkbox">
+      <span class="hint">Answer a Draw Two or Wild Draw Four with the same card</span>
+    </div>
     <button id="start-button" class="big-button">Start Game</button>
   </div>
 </div>
@@ -52,6 +57,7 @@
     <div id="table-status">
       <div id="color-indicator"></div>
       <div id="direction-indicator"></div>
+      <div id="pending-total" class="hidden"></div>
     </div>
   </div>
 
@@ -101,6 +107,7 @@
 <script src="engine.js"></script>
 <script src="ai.js"></script>
 <script src="save.js"></script>
+<script src="narrate.js"></script>
 <script src="ui.js"></script>
 </body>
 </html>

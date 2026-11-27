@@ -7,6 +7,8 @@
  * state, so the screen can never drift from the rules. The one other
  * way in is a game restored by save.js, which validates it first. Every
  * state the UI adopts is handed back to save.js, so a reload resumes it.
+ * The words in the message bar come from narrate.js, which reads them
+ * off the engine states; this file only decides when to show them.
  */
 (function () {
   'use strict';
@@ -14,6 +16,7 @@
   var E = window.UnoEngine;
   var AI = window.UnoAI;
   var S = window.UnoSave;
+  var N = window.UnoNarrate;
   var rng = Math.random;
   /* null when storage is missing or blocked; save.js then does nothing. */
   var storage = S.storageFrom(window);
@@ -29,34 +32,14 @@
 
   function $(id) { return document.getElementById(id); }
 
-  var VALUE_LABEL = {
-    skip: '⊘', reverse: '⇄', draw2: '+2', wild: 'WILD', wild4: '+4'
-  };
-
-  function label(card) { return VALUE_LABEL[card.value] || card.value; }
-
-  function playerName(i) { return i === 0 ? 'You' : 'CPU ' + i; }
+  var label = N.cardLabel;
+  var playerName = N.playerName;
 
   function setMessage(text) { $('message-bar').textContent = text; }
 
-  /*
-   * A successful challenge is an accusation, so the message carries the
-   * evidence with it: how many cards of the color in play the offender
-   * was holding when the wild went down. That count comes from the
-   * engine's snapshot, which is the only honest source for it.
-   */
-  function challengeNote(result) {
-    var offender = playerName(result.offender);
-    if (result.guilty) {
-      return 'Challenge upheld: ' + offender + ' held ' + result.colorMatches + ' ' +
-        result.color + ' card' + (result.colorMatches === 1 ? '' : 's') + ' and ' +
-        (result.offender === 0 ? 'draw ' : 'draws ') + result.drew + '.';
-    }
-    var basis = result.color === null
-      ? 'there was no color in play to match'
-      : offender + ' held no ' + result.color;
-    return 'Challenge failed: ' + basis + '. ' + playerName(result.challenger) +
-      (result.challenger === 0 ? ' draw ' : ' draws ') + result.drew + '.';
+  /* True when the human is on turn owing a total: a Wild Draw Four or a stack. */
+  function humanOwes() {
+    return !!(state && state.currentPlayer === 0 && N.owed(state) > 0);
   }
 
   /* ----- state transitions ----- */
@@ -75,38 +58,15 @@
   }
 
   /*
-   * Every move funnels through here: narrate any automatic Uno penalty
-   * the transition caused, adopt the new state, then re-render and let
-   * the CPU loop continue.
+   * Every move funnels through here: adopt the new state, show the move
+   * along with whatever else the transition did (see message in
+   * narrate.js), then re-render and let the CPU loop continue.
    */
   function commit(next, note) {
-    /*
-     * Uno penalties are narrated from the engine's own record rather
-     * than inferred from hand-size changes, which used to misreport a
-     * pending player's voluntary draw as a two-card penalty and missed
-     * real penalties whenever the same move re-armed the Uno window.
-     */
-    if (next.unoPenalty && next.unoPenalty.drew > 0) {
-      var offender = next.unoPenalty.player;
-      note = playerName(offender) + ' missed UNO and ' + (offender === 0 ? 'draw ' : 'draws ') +
-        next.unoPenalty.drew + '! ' + (note || '');
-    }
-    /*
-     * Challenge outcomes are narrated from the engine's record for the
-     * same reason: only the engine holds the guilt snapshot the verdict
-     * came from, and the cards can move in either direction, so reading
-     * the result off the table would be guesswork.
-     */
-    if (next.challengeResult) {
-      note = (note || '') + ' ' + challengeNote(next.challengeResult);
-    }
-    if (next.pendingChallenge && next.pendingChallenge.victim === 0) {
-      note = (note || '') + ' Challenge it, or take ' + next.pendingChallenge.amount + '?';
-    }
     adopt(next);
     if (state.currentPlayer !== 0 || state.players[0].hand.length !== 2) unoArmed = false;
     /* Always written, so a successful action clears stale error text. */
-    setMessage((note || '').trim());
+    setMessage(N.message(next, note));
     render();
     scheduleCpu();
   }
@@ -124,7 +84,7 @@
     var seat = state.currentPlayer;
     if (state.pendingChallenge && state.pendingChallenge.victim === seat) {
       if (AI.decideChallenge(state, seat, rng)) {
-        commit(E.applyChallenge(state, rng), playerName(seat) + ' challenges the Wild Draw Four!');
+        commit(E.applyChallenge(state, rng), N.challengeCall(seat));
         return;
       }
       /*
@@ -136,59 +96,51 @@
     }
     var action = AI.chooseAction(state, seat, rng);
     if (action.type === 'draw') {
-      var drawNote = state.pendingChallenge
-        ? playerName(seat) + ' takes ' + state.pendingChallenge.amount + '.'
-        : playerName(seat) + ' draws a card.';
-      commit(E.applyDraw(state, rng), drawNote);
+      var drawn = E.applyDraw(state, rng);
+      commit(drawn, N.drawNote(state, drawn));
       return;
     }
-    var card = state.players[seat].hand[action.cardIndex];
-    var note = playerName(seat) + ' plays ' + (card.color || 'wild') + ' ' + label(card) +
-      (action.chosenColor ? ', choosing ' + action.chosenColor : '') +
-      (action.declareUno ? '. UNO!' : '.');
-    commit(E.applyPlay(state, action, rng), note);
+    commit(E.applyPlay(state, action, rng), N.playNote(state, action));
   }
 
   /* ----- human actions ----- */
 
   function humanPlay(cardIndex, chosenColor) {
-    var card = state.players[0].hand[cardIndex];
-    var note = 'You play ' + (card.color || 'wild') + ' ' + label(card) +
-      (chosenColor ? ', choosing ' + chosenColor : '') + (unoArmed ? '. UNO!' : '.');
     var action = {
       type: 'play', playerIndex: 0, cardIndex: cardIndex,
       chosenColor: chosenColor, declareUno: unoArmed
     };
     try {
-      commit(E.applyPlay(state, action, rng), note);
+      commit(E.applyPlay(state, action, rng), N.playNote(state, action));
     } catch (err) {
       setMessage(err.message);
     }
   }
 
   /*
-   * The two halves of the challenge window. Both are ordinary engine
-   * actions; the buttons exist so the choice is explicit, the way the
-   * keep / play-drawn pair works for a just-drawn card.
+   * Challenge, and Take for any total the human owes: a Wild Draw Four
+   * under the challenge rule, or a stack under the stacking rule. Both
+   * are ordinary engine actions; the buttons exist so the choice is
+   * explicit, the way the keep / play-drawn pair works for a just-drawn
+   * card. Answering a stack needs no button of its own: it is a card
+   * played from the hand like any other.
    */
   function onChallengeClick() {
     if (!state || !state.pendingChallenge || state.pendingChallenge.victim !== 0) return;
-    commit(E.applyChallenge(state, rng), 'You challenge the Wild Draw Four.');
+    commit(E.applyChallenge(state, rng), N.challengeCall(0));
   }
 
-  function onAcceptClick() {
-    if (!state || !state.pendingChallenge || state.pendingChallenge.victim !== 0) return;
-    commit(E.applyDraw(state, rng), 'You take ' + state.pendingChallenge.amount + '.');
+  function onTakeClick() {
+    if (!humanOwes()) return;
+    var taken = E.applyDraw(state, rng);
+    commit(taken, N.drawNote(state, taken));
   }
 
   function onCardClick(cardIndex) {
     if (state.phase !== 'playing' || state.currentPlayer !== 0) return;
     var legal = E.legalPlays(state, 0).some(function (p) { return p.cardIndex === cardIndex; });
     if (!legal) {
-      var why = "That card doesn't match.";
-      if (state.pendingChallenge) why = 'Challenge the Wild Draw Four, or take the cards.';
-      else if (state.pendingDraw) why = 'Only the drawn card can be played now.';
-      setMessage(why);
+      setMessage(N.blockedNote(state, 'card'));
       return;
     }
     if (E.isWild(state.players[0].hand[cardIndex])) {
@@ -201,21 +153,17 @@
 
   function onDrawClick() {
     if (!state || state.phase !== 'playing' || state.currentPlayer !== 0) return;
-    if (state.pendingDraw) { setMessage('You already drew: play the card or keep it.'); return; }
     /*
-     * Taking the cards is a decision, so it goes through its own button
-     * rather than a stray tap on the pile.
+     * Taking a total is a decision, so it goes through its own button
+     * rather than a stray tap on the pile: the engine would deal the
+     * whole stack for that tap, not one card.
      */
-    if (state.pendingChallenge) {
-      setMessage('Challenge the Wild Draw Four, or take the cards.');
+    if (state.pendingDraw || humanOwes()) {
+      setMessage(N.blockedNote(state, 'pile'));
       return;
     }
-    var before = state.players[0].hand.length;
     var next = E.applyDraw(state, rng);
-    var note = next.players[0].hand.length === before
-      ? 'No cards left to draw; turn passes.'
-      : (next.pendingDraw ? 'You drew a playable card: play it or keep it.' : 'You draw a card; turn passes.');
-    commit(next, note);
+    commit(next, N.drawNote(state, next));
   }
 
   function onUnoClick() {
@@ -309,6 +257,17 @@
     $('color-indicator').title = 'Current color: ' + (state.currentColor || 'any');
     $('direction-indicator').textContent =
       state.config.numPlayers === 2 ? '' : (state.direction === 1 ? '↻' : '↺');
+    /*
+     * The total waiting on the player to move, whoever that is, so a
+     * stack can be watched growing before it reaches the human.
+     */
+    var total = N.owed(state);
+    var pending = $('pending-total');
+    pending.classList.toggle('hidden', total === 0);
+    pending.textContent = total ? '+' + total : '';
+    pending.title = total
+      ? total + ' cards waiting for ' + (state.currentPlayer === 0 ? 'you' : playerName(state.currentPlayer))
+      : '';
 
     /* Human hand */
     $('human-area').classList.toggle('current-turn',
@@ -344,10 +303,10 @@
     var facingWild4 = !!(state.phase === 'playing' && state.pendingChallenge &&
       state.pendingChallenge.victim === 0);
     $('challenge-button').classList.toggle('hidden', !facingWild4);
-    var acceptBtn = $('accept-button');
-    acceptBtn.classList.toggle('hidden', !facingWild4);
-    /* Four in official play; the stacking house rule can grow the total. */
-    if (facingWild4) acceptBtn.textContent = 'Take ' + state.pendingChallenge.amount;
+    var takeBtn = $('accept-button');
+    takeBtn.classList.toggle('hidden', !humanOwes());
+    /* Four for a Wild Draw Four; a stack can be any total. */
+    if (humanOwes()) takeBtn.textContent = 'Take ' + N.owed(state);
 
     var drewPlayable = !!(state.pendingDraw && state.currentPlayer === 0 && state.phase === 'playing');
     $('play-drawn-button').classList.toggle('hidden', !drewPlayable);
@@ -427,10 +386,14 @@
     adopt(E.createGame({
       numPlayers: opponents + 1,
       targetScore: target,
-      challengeRule: $('challenge-rule').checked
+      challengeRule: $('challenge-rule').checked,
+      stackDraws: $('stack-draws').checked
     }, rng));
     unoArmed = false;
-    setMessage(state.currentPlayer === 0 ? 'Your move.' : playerName(state.currentPlayer) + ' starts.');
+    /* A flipped Draw Two under stacking leaves the human owing it at once. */
+    setMessage(state.currentPlayer === 0
+      ? (N.prompt(state) || 'Your move.')
+      : playerName(state.currentPlayer) + ' starts.');
     render();
     scheduleCpu();
   }
@@ -455,7 +418,9 @@
     $('game-screen').classList.remove('hidden');
     var turn = '';
     if (state.phase === 'playing') {
-      turn = state.currentPlayer === 0 ? ' Your move.' : ' ' + playerName(state.currentPlayer) + ' to play.';
+      turn = state.currentPlayer === 0
+        ? ' ' + (N.prompt(state) || 'Your move.')
+        : ' ' + playerName(state.currentPlayer) + ' to play.';
     }
     setMessage('Welcome back.' + turn);
     render();
@@ -478,7 +443,7 @@
   $('uno-button').addEventListener('click', onUnoClick);
   $('catch-button').addEventListener('click', onCatchClick);
   $('challenge-button').addEventListener('click', onChallengeClick);
-  $('accept-button').addEventListener('click', onAcceptClick);
+  $('accept-button').addEventListener('click', onTakeClick);
   $('keep-button').addEventListener('click', function () {
     if (state && state.pendingDraw && state.currentPlayer === 0) {
       commit(E.applyPass(state), 'You keep the card; turn passes.');
