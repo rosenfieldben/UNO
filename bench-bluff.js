@@ -60,11 +60,11 @@
  *    It is several times slower.
  *
  * 4. With --stack, the stacking house rule is on as well, so a victim
- *    may answer a Wild Draw Four with their own. Those answers are
- *    counted apart from Wild Draw Fours played on an ordinary turn,
- *    since the answer was the only card the player was allowed to play
- *    and is judged on the color the previous offender declared. With
- *    --breakeven they are forked too, whatever the victim holds.
+ *    may answer a Wild Draw Four with their own. Those answers are only
+ *    counted, apart from Wild Draw Fours played on an ordinary turn: an
+ *    answer opens no challenge window, since it was the only kind of
+ *    card its player was allowed to play, so there is no guilt to share
+ *    out and nothing to fork.
  *
  * Every round is its own seeded game, played to its first round end.
  * Each pass and table size has its own block of seeds, and every chance
@@ -130,8 +130,9 @@ function challenges(victims, state, seat, rng) {
 /*
  * Plays from state s until the round ends, every seat driven by the AI.
  * chanceFor(seat) gives each seat's cpuBluffChance. onWild4, if given,
- * sees every Wild Draw Four the moment it lands, along with the states
- * before and after it. Returns the final state.
+ * sees every Wild Draw Four the moment it lands, answers to a stack
+ * included, along with the states before and after it. Returns the
+ * final state.
  */
 function playOut(s, rng, chanceFor, victims, onWild4) {
   for (var steps = 0; s.phase === 'playing'; steps++) {
@@ -149,7 +150,7 @@ function playOut(s, rng, chanceFor, victims, onWild4) {
     }
     var card = s.players[seat].hand[action.cardIndex];
     var next = E.applyPlay(s, action, rng);
-    if (onWild4 && card.value === 'wild4' && next.pendingChallenge) onWild4(s, next, action);
+    if (onWild4 && card.value === 'wild4') onWild4(s, next, action);
     s = next;
   }
   return s;
@@ -225,10 +226,9 @@ function forks() { return { guilty: { wins: [], pts: [] }, honest: { wins: [], p
 /* Pass 1, and pass 3 when asked: bluff share, tells, and the fork. */
 function bluffShare(numPlayers, chance, opts) {
   var t = {
-    lastCard: 0, stackedLastCard: 0, all: tally(), low: tally(), high: tally(),
+    lastCard: 0, answers: 0, answersLastCard: 0, all: tally(), low: tally(), high: tally(),
     off12: tally(), off34: tally(), off5: tally(), sameBluff: tally(), sameHonest: tally(),
-    stacked: tally(), stackedLow: tally(), stackedHigh: tally(), stackedSame: tally(),
-    fork: { off14: forks(), off5: forks(), stacked: forks() }
+    fork: { off14: forks(), off5: forks() }
   };
   function every() { return chance; }
   for (var r = 0; r < opts.rounds; r++) {
@@ -238,35 +238,34 @@ function bluffShare(numPlayers, chance, opts) {
     playOut(g.state, g.rng, every, opts.victims, function (before, after, action) {
       var seat = before.currentPlayer;
       var offenderLeft = after.players[seat].hand.length;
-      /* An answer to a stack lands while the previous window is still open. */
-      var answer = !!before.pendingChallenge;
-      if (offenderLeft === 0) {
-        if (answer) t.stackedLastCard++; else t.lastCard++;
+      /*
+       * Under stacking a pending total admits only cards of its own value,
+       * so a Wild Draw Four played over one is an answer, and an answer
+       * opens no window.
+       */
+      if (before.pendingDrawCount > 0) {
+        t.answers++;
+        if (offenderLeft === 0) t.answersLastCard++;
         return;
       }
+      if (offenderLeft === 0) { t.lastCard++; return; }
       var guilty = after.pendingChallenge.hadColorMatch;
       var victim = after.pendingChallenge.victim;
       var low = before.players[victim].hand.length <= 2;
-      if (answer) {
-        add(t.stacked, guilty);
-        add(low ? t.stackedLow : t.stackedHigh, guilty);
-        if (guilty) add(t.stackedSame, action.chosenColor === before.currentColor);
-      } else {
-        add(t.all, guilty);
-        add(low ? t.low : t.high, guilty);
-        if (low) add(offenderLeft <= 2 ? t.off12 : offenderLeft <= 4 ? t.off34 : t.off5, guilty);
-        add(guilty ? t.sameBluff : t.sameHonest, action.chosenColor === before.currentColor);
-      }
-      if (opts.breakeven && (answer || low)) {
+      add(t.all, guilty);
+      add(low ? t.low : t.high, guilty);
+      if (low) add(offenderLeft <= 2 ? t.off12 : offenderLeft <= 4 ? t.off34 : t.off5, guilty);
+      add(guilty ? t.sameBluff : t.sameHonest, action.chosenColor === before.currentColor);
+      if (opts.breakeven && low) {
         /*
          * Both copies replay from one fork seed, so they differ only in
-         * the victim's answer.
+         * the victim's decision.
          */
         if (forked >= FORKS) throw new Error('more than ' + FORKS + ' forks in one round');
         var forkSeed = (SEEDS.fork + numPlayers) * 1e8 + r * FORKS + (forked++);
         var accepted = playOut(decline(after, chance, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
         var challenged = playOut(E.applyChallenge(after, U.seededRng(forkSeed)), U.seededRng(forkSeed + 1), every, opts.victims);
-        var bucket = answer ? t.fork.stacked : offenderLeft <= 4 ? t.fork.off14 : t.fork.off5;
+        var bucket = offenderLeft <= 4 ? t.fork.off14 : t.fork.off5;
         var side = guilty ? bucket.guilty : bucket.honest;
         side.wins.push((challenged.roundWinner === victim ? 1 : 0) - (accepted.roundWinner === victim ? 1 : 0));
         side.pts.push(margin(challenged, victim) - margin(accepted, victim));
@@ -348,18 +347,11 @@ function main() {
       return { n: n, t: t };
     });
     if (opts.stack) {
-      console.log('players | answers to a stack: n  last card  per 100 rounds  guilty (95% CI)         | victim 1-2: n  guilty |' +
-        ' victim 3+: n  guilty | guilty ones re-declaring the color in play');
+      console.log('players | answers to a stack, never challengeable: n  as a last card  per 100 rounds');
       rows.forEach(function (row) {
         var t = row.t;
-        console.log(String(row.n).padStart(7) + ' | ' + String(t.stacked[1]).padStart(21) + ' ' +
-          String(t.stackedLastCard).padStart(10) + ' ' +
-          (100 * (t.stacked[1] + t.stackedLastCard) / opts.rounds).toFixed(1).padStart(15) + ' ' +
-          pct(t.stacked[0], t.stacked[1]) + ' ' +
-          wilson(t.stacked[0], t.stacked[1]).padEnd(17) + ' | ' +
-          String(t.stackedLow[1]).padStart(12) + ' ' + pct(t.stackedLow[0], t.stackedLow[1]) + ' | ' +
-          String(t.stackedHigh[1]).padStart(11) + ' ' + pct(t.stackedHigh[0], t.stackedHigh[1]) + ' | ' +
-          pct(t.stackedSame[0], t.stackedSame[1]).padStart(42));
+        console.log(String(row.n).padStart(7) + ' | ' + String(t.answers).padStart(42) + ' ' +
+          String(t.answersLastCard).padStart(15) + ' ' + (100 * t.answers / opts.rounds).toFixed(1).padStart(15));
       });
     }
     if (chance > 0) {
@@ -386,7 +378,6 @@ function main() {
           honest: { wins: f.off14.honest.wins.concat(f.off5.honest.wins), pts: f.off14.honest.pts.concat(f.off5.honest.pts) }
         };
         console.log(forkRow(row.n, 'either', both, t.low));
-        if (opts.stack) console.log(forkRow(row.n, 'stack, any', f.stacked, t.stacked));
       });
     }
   });
