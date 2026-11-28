@@ -11,7 +11,12 @@ the target score, then play: click a card to play it, click the draw pile
 to draw, and use the UNO! button when you are down to two cards (or during
 your call window). If a CPU forgets to call Uno, hit Catch! before the
 next player acts. With the challenge rule switched on, a Wild Draw Four
-played at you waits for Challenge! or Take 4 before anything is drawn.
+played at you on an ordinary turn waits for Challenge! or Take 4 before
+anything is drawn. With stacking switched on, a Draw Two or Wild Draw
+Four played at you can be answered with the same card from your hand,
+which passes the total on; an answer can never be challenged. The
+total waiting on whoever is to move shows on the table, and when it is
+yours, Take N takes it.
 
 The game saves itself in the browser after every move, so a refresh or a
 closed tab picks up where you left off. New game, or the end of a game,
@@ -32,6 +37,10 @@ it just cannot be resumed.
 - `ui.js` - the only file that touches the DOM; mutates state exclusively
   through engine functions, or restores a game saved earlier through
   `save.js`, and saves every state it adopts.
+- `narrate.js` - the message bar's words as pure functions of engine
+  states: what a move did, how many cards a take really dealt, a
+  challenge verdict, and what the human owes next. `ui.js` decides when
+  to show them; this decides what they say.
 - `index.html`, `style.css` - markup and card-table styling.
 - `testutil.js` - shared runner, seeded rng, and deck-stacking helpers
   for the test suites.
@@ -40,9 +49,10 @@ it just cannot be resumed.
   player can see at the table, and what bluffing does to a CPU's round
   win rate against the same rounds played without it. With
   `--breakeven` it also measures what a challenge is worth in round
-  wins. Run it with `node bench-bluff.js`, which takes a couple of
-  minutes; it is a measurement, not a test, and its name keeps it out of
-  `node --test`.
+  wins and in points, split by the offender's hand; `--stack` turns
+  stacking on. Run it with `node bench-bluff.js`, which takes a couple
+  of minutes; it is a measurement, not a test, and its name keeps it out
+  of `node --test`.
 
 ## Tests
 
@@ -79,16 +89,19 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   that window resolves: accepting or challenging and losing lets the win
   stand, with the drawn cards counted in the score, while a successful
   challenge hands the four back to the offender and play continues.
-- With `stackDraws` and `challengeRule` both on, the victim has a third
-  option: answering with their own Wild Draw Four. That closes the
-  current window and opens a fresh one for the next player, with the
-  total raised by four and guilt judged again for the new offender. A
-  successful challenge moves the whole accumulated total to the most
-  recent offender; a failed one costs the challenger that total plus
-  two. An offender who played their last card ends the chain, since the
-  round is over as soon as the window resolves, exactly as a winning
-  answer to a stacked Draw Two leaves the next player no answer of their
-  own. No official rule covers the combination, so this is a house
+- With stacking and the challenge rule both on, the victim of a Wild
+  Draw Four has a third option: answering with their own. An answer
+  closes the window and opens none of its own. It was the only kind of
+  card its player could play, so it is never judged on the color they
+  hold; it adds four to the total exactly as a Draw Two answers a Draw
+  Two, and the next player answers again or takes the total. Judging
+  answers on color, as an earlier version did, made about two thirds of
+  CPU answers guilty, which turned challenging them into a near-free
+  win. A Wild Draw Four played as a last card cannot be answered, since
+  the round is over as soon as its window resolves. An answer played as
+  a last card ends the round at once, and the next player takes the
+  total before hands are counted, exactly as after a winning Draw Two
+  answer. No official rule covers the combination, so this is a house
   choice; with stacking off it reduces exactly to the official four and
   six.
 - With the challenge rule on, CPU players sometimes bluff: they play a
@@ -97,30 +110,55 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   one or two cards, and then with probability `cpuBluffChance` (default
   0.1). Bluffing in ordinary play as well was tried and cost a CPU two to
   three points of round win rate, because it spends the Wild Draw Four
-  too early; bluffing only against a low hand costs nothing measurable.
-- When to challenge. Call g the share of Wild Draw Fours you face that
-  are bluffs. Counting cards, a failed challenge costs six against four
-  for accepting, so challenging pays when 6 x (1 - g) < 4, that is when
-  g is above one third. That undersells it: a successful challenge also
-  keeps your turn, and with one or two cards left that turn often wins
-  the round. Measured in round wins (`node bench-bluff.js --breakeven`),
-  challenging at one or two cards pays once g is above roughly 10 to
-  15%. At the default the CPU bluffs about 10 to 13% of the time
-  against a hand that small, so the call is a genuine gamble. Against a
-  hand of three or more, with stacking off, a CPU Wild Draw Four is
-  never a chosen bluff, so accepting is right.
+  too early. Bluffing only against a low hand costs about a tenth of a
+  point at most: 0.04, 0.09 and 0.12 points of round win rate at two,
+  three and four players, over 60,000 rounds each against the same
+  rounds played without bluffing, and only the four-player interval
+  excludes zero.
+- When to challenge: when you hold one or two cards and the CPU still
+  holds five or more; otherwise accept. Call g the share of Wild Draw
+  Fours you face that are bluffs. Counting cards, a failed challenge
+  costs six against four for accepting, so challenging pays when
+  6 x (1 - g) < 4, that is when g is above one third. That undersells
+  it: a successful challenge also keeps your turn, and with one or two
+  cards left that turn often wins the round. Measured in play
+  (`node bench-bluff.js --breakeven`, 60,000 rounds per table size, at
+  the default bluff chance), the bar at one or two cards depends on the
+  CPU's hand after the play. Left with one to four cards, a CPU bluffs
+  about 5% of the time, below a bar of 11 to 12% in round wins and 24
+  to 28% in points, and challenging every such play costs 1 to 2 points
+  of round wins and 8 to 11 card points. Left with five or more, it
+  bluffs about a quarter of the time, above a bar of 16 to 19% in round
+  wins and 11 to 18% in points, and challenging every one gains about 2
+  points of round wins and 4 to 6 card points. Every one of those
+  ranges excludes zero, at two, three and four players. Against a hand
+  of three or more a CPU Wild Draw Four is never a chosen bluff, so
+  accepting is right. With stacking on, accepting stays right in the
+  same cases, but challenging a CPU left with five or more is no longer
+  a clear gain in round wins (+1.4, +0.5 and 0.0 points at two, three
+  and four players, none clear of zero). In card points it still pays
+  at two players (+4.2) but not clearly at three or four (+1.7 and
+  -0.8, both ranges spanning zero). Not challenging then includes
+  answering with your own Wild Draw Four when you hold one.
 - Tells. A player can read some of this from the table. Besides your own
   hand size, the offender's matters most: at the default, a Wild Draw
   Four from a CPU left with one or two cards is a bluff about 3% of the
   time, against about a quarter of the time from one holding five or
-  more, since a big hand is likely to still hold the color in play. A
-  bluffing CPU never re-declares the color already in play, so that
-  gives nothing away.
+  more (25 to 28%), since a big hand is likely to still hold the color
+  in play. A chosen bluff never re-declares the color already in play,
+  so that gives nothing away. The rare guilty play that does, about 1%
+  of them in a two-player game, is a CPU whose own missed-Uno penalty,
+  dealt in the same move, handed it the color.
 - Reverse acts as Skip in a two-player game.
 - Failing to call Uno before the next action costs two cards; in a
   two-player game an action card that hands you the turn straight back
   does not let you dodge the penalty.
-- Stacking Draw Two / Draw Four is available behind the off-by-default
-  `stackDraws` config flag.
+- Stacking is a setup option, off by default (`stackDraws` in the
+  engine config): a Draw Two may be answered with a Draw Two and a Wild
+  Draw Four with a Wild Draw Four, passing the growing total to the
+  next player. Only the player who cannot or will not answer takes it.
+  Taking it is its own button, Take N, because the engine deals the
+  whole total for what would otherwise be a single-card draw, so a tap
+  on the draw pile does nothing while a total is owed.
 - Scoring is standard: number cards face value, action cards 20, wilds 50,
   first to the target score (default 500) wins.

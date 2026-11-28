@@ -199,19 +199,28 @@
        * ordinary play lost 2 to 3 points of round win rate in
        * bench-bluff.js at chance 0.2, because it spends the Wild Draw
        * Four long before it matters. Bluffing only here, at the default
-       * chance, costs nothing measurable against the same seeds played
-       * without it (the bench's win-rate pass). The price is a tell, by
-       * deliberate choice: with stacking off, a Wild Draw Four played at
-       * someone holding three or more cards is never a chosen bluff.
+       * chance, costs about a tenth of a point of round win rate at most
+       * against the same seeds played without it: the bench's win-rate
+       * pass at 60,000 rounds per table size measured 0.04, 0.09 and
+       * 0.12 points at two, three and four players, and only the
+       * four-player interval excludes zero. The price is a tell, by
+       * deliberate choice: a Wild Draw Four played at someone holding
+       * three or more cards is never a chosen bluff.
        *
        * The roll happens only when it decides something: the Wild Draw
        * Four would be a bluff and another legal play exists. With the
        * rule off nothing is a bluff and nothing is rolled, so play there
        * is exactly as before. A Wild Draw Four that is the only legal
-       * card, as when answering a stacked one, is not a bluff decision
-       * either: the CPU plays it as it always did, guilty or not.
-       * Declining is always safe, since it only happens when another
-       * legal play exists.
+       * card is not a bluff decision either, and the CPU plays it as it
+       * always did. Answering a stack it cannot be a bluff, since an
+       * answer is never judged on color (see applyCardEffect in
+       * engine.js). On an ordinary turn it is the only legal card only
+       * when no card of the color in play is held as the CPU decides, but
+       * the engine judges the hand as the card lands: in a two-player
+       * game a Skip or Reverse can hand the turn back to a CPU that forgot
+       * Uno, and the penalty cards dealt in the same move may hold the
+       * color. Declining is always safe, since it only happens when
+       * another legal play exists.
        */
       if (wild4) {
         var wouldBluff = state.config.challengeRule && holdsActiveColor(state, playerIndex);

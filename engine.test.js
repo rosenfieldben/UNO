@@ -847,7 +847,7 @@ test('a challenge window freezes ordinary play until it is answered', function (
   assertValid(g3);
 });
 
-test('stacking: answering a Wild Draw Four grows the total and re-judges guilt', function () {
+test('stacking: answering a Wild Draw Four closes the window and opens none', function () {
   var hand0 = [card(null, 'wild4'), card('red', '3')].concat(FILLER[0].slice(0, 5));
   var hand1 = [card(null, 'wild4')].concat(FILLER[1].slice(0, 6));
   var g = makeGame([hand0, hand1, FILLER[2]], card('red', '5'),
@@ -862,51 +862,89 @@ test('stacking: answering a Wild Draw Four grows the total and re-judges guilt',
 
   var g3 = E.applyPlay(g2,
     { type: 'play', playerIndex: 1, cardIndex: plays[0].cardIndex, chosenColor: 'blue' }, seededRng(9));
+  assertEqual(g3.pendingChallenge, null, 'answering gave up the challenge, and the answer opens no window');
   assertEqual(g3.pendingDrawCount, 8, 'the total grows by four');
-  assertEqual(g3.pendingChallenge.offender, 1, 'a fresh window for a fresh offender');
-  assertEqual(g3.pendingChallenge.victim, 2);
-  assertEqual(g3.pendingChallenge.color, 'green', 'judged against the color player 0 declared');
-  assertEqual(g3.pendingChallenge.hadColorMatch, false, 'a hand of blues is clean against green');
-  assertEqual(g3.pendingChallenge.amount, 8);
+  assertEqual(g3.pendingDrawValue, 'wild4');
+  assertEqual(g3.currentPlayer, 2);
+  assertEqual(g3.currentColor, 'blue');
+  assertThrows(function () { E.applyChallenge(g3, seededRng(9)); }, 'there is nothing to challenge');
   assertValid(g3);
 
-  var accepted = E.applyDraw(g3, seededRng(9));
-  assertEqual(accepted.players[2].hand.length, 15, 'the whole total lands at once');
-  assertEqual(accepted.currentPlayer, 0);
-  assertValid(accepted);
-
-  var failed = E.applyChallenge(g3, seededRng(9));
-  assertEqual(failed.players[2].hand.length, 17, 'the total plus two');
-  assertEqual(failed.currentPlayer, 0, 'and the challenger is skipped');
-  assertValid(failed);
+  var taken = E.applyDraw(g3, seededRng(9));
+  assertEqual(taken.players[2].hand.length, 15, 'the whole total lands at once');
+  assertEqual(taken.currentPlayer, 0);
+  assertEqual(taken.pendingDrawCount, 0);
+  assertEqual(taken.pendingDrawValue, null);
+  assertValid(taken);
 });
 
-test('stacking: a successful challenge moves the whole total to the last offender', function () {
-  var hand0 = [card(null, 'wild4'), card('red', '3')].concat(FILLER[0].slice(0, 5));
+test('stacking: an answer is never judged on the color its player holds', function () {
+  /*
+   * Player 1 still holds a green, the color player 0 declared. On an
+   * ordinary turn that would make its Wild Draw Four a bluff; as an
+   * answer it was the only kind of card player 1 could play, so it is
+   * not judged at all, and player 2 may only answer again or take the
+   * total.
+   */
+  var hand0 = [card(null, 'wild4')].concat(FILLER[0].slice(0, 6));
   var hand1 = [card(null, 'wild4'), card('green', '9')].concat(FILLER[1].slice(0, 5));
-  var g = makeGame([hand0, hand1, FILLER[2]], card('red', '5'),
+  var hand2 = [card(null, 'wild4'), card('green', '8')].concat(FILLER[2].slice(0, 5));
+  var g = makeGame([hand0, hand1, hand2], card('red', '5'),
     { challengeRule: true, stackDraws: true });
   var g2 = playWild4(g, 'green');
+  assertEqual(g2.pendingChallenge.hadColorMatch, false, 'player 0 was honest');
   var g3 = E.applyPlay(g2,
     { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'blue' }, seededRng(9));
-  assertEqual(g3.pendingChallenge.hadColorMatch, true, 'player 1 kept a green');
-  assertEqual(g3.pendingChallenge.colorMatches, 1);
-  var g4 = E.applyChallenge(g3, seededRng(9));
-  assertEqual(g4.players[1].hand.length, 14, 'six left plus all eight');
-  assertEqual(g4.players[2].hand.length, 7, 'the challenger draws nothing');
-  assertEqual(g4.currentPlayer, 2, 'and keeps the turn');
-  assertEqual(g4.players[0].hand.length, 6, 'the first offender is off the hook');
-  assertEqual(g4.pendingDrawCount, 0);
-  assertValid(g4);
+  assertEqual(g3.pendingChallenge, null, 'no verdict waits on player 1 despite its green');
+  var plays = E.legalPlays(g3, 2);
+  assertEqual(plays.length, 1, 'player 2 may answer in turn');
+  var g4 = E.applyPlay(g3,
+    { type: 'play', playerIndex: 2, cardIndex: plays[0].cardIndex, chosenColor: 'yellow' }, seededRng(9));
+  assertEqual(g4.pendingChallenge, null);
+  assertEqual(g4.pendingDrawCount, 12);
+  assertEqual(g4.currentPlayer, 0, 'back to the first offender, who owes the lot');
+  assertEqual(E.legalPlays(g4, 0).length, 0, 'with no Wild Draw Four left it can only take them');
+  var g5 = E.applyDraw(g4, seededRng(9));
+  assertEqual(g5.players[0].hand.length, 18, 'six left plus all twelve');
+  assertEqual(g5.currentPlayer, 1);
+  assertValid(g5);
 });
 
-test('stacking: a Wild Draw Four played as a last card ends the chain', function () {
+test('stacking: a Wild Draw Four played as a last card cannot be answered', function () {
   /*
    * Answering it would put two players on an empty hand at once, and the
    * round would then go to whichever of them endRound scanned last
    * rather than to whoever emptied their hand first. Plain stacking
    * truncates the same way, so the victim here may only challenge or
    * accept.
+   */
+  var hand0 = [card(null, 'wild4'), card('red', '3')].concat(FILLER[0].slice(0, 5));
+  var hand1 = [card(null, 'wild4')].concat(FILLER[1].slice(0, 6));
+  var g = makeGame([hand0, hand1, FILLER[2]], card('red', '5'),
+    { challengeRule: true, stackDraws: true });
+  trimHand(g, 0, 1);
+  var g2 = playWild4(g, 'green');
+  assertEqual(g2.players[0].hand.length, 0, 'player 0 played their last card');
+  assertEqual(g2.phase, 'playing', 'still waiting on the window');
+  assertEqual(E.legalPlays(g2, 1).length, 0, 'the Wild Draw Four in hand cannot answer');
+  assertThrows(function () {
+    E.applyPlay(g2, { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'yellow' }, seededRng(9));
+  }, 'answering an offender who is already out must be rejected');
+  assertValid(g2);
+
+  var accepted = E.applyDraw(g2, seededRng(9));
+  assertEqual(accepted.phase, 'roundOver');
+  assertEqual(accepted.roundWinner, 0);
+  assertEqual(accepted.players[1].hand.length, 11, 'having taken the four');
+  assertValid(accepted);
+});
+
+test('stacking: answering with a last card ends the round, and the next player takes the total', function () {
+  /*
+   * The answer opens no window, so nothing is left to decide: the round
+   * ends at once and the player who would have answered next takes the
+   * total before hands are counted, exactly as after a winning Draw Two
+   * answer.
    */
   var hand0 = [card(null, 'wild4'), card('red', '3')].concat(FILLER[0].slice(0, 5));
   var hand1 = [card(null, 'wild4')].concat(FILLER[1].slice(0, 6));
@@ -917,27 +955,16 @@ test('stacking: a Wild Draw Four played as a last card ends the chain', function
   trimHand(g, 2, 1);
   var g2 = playWild4(g, 'green');
   var g3 = E.applyPlay(g2,
-    { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'blue' }, seededRng(9));
+    { type: 'play', playerIndex: 1, cardIndex: 0, chosenColor: 'blue', declareUno: false }, seededRng(9));
   assertEqual(g3.players[1].hand.length, 0, 'player 1 answered with their last card');
-  assertEqual(g3.phase, 'playing', 'still waiting on the window');
-  assertEqual(g3.pendingDrawCount, 8);
-  assertEqual(E.legalPlays(g3, 2).length, 0, 'the Wild Draw Four in hand cannot answer');
-  assertThrows(function () {
-    E.applyPlay(g3, { type: 'play', playerIndex: 2, cardIndex: 0, chosenColor: 'yellow' }, seededRng(9));
-  }, 'answering an offender who is already out must be rejected');
+  assertEqual(g3.phase, 'roundOver');
+  assertEqual(g3.roundWinner, 1, 'the player who emptied their hand wins it');
+  assertEqual(g3.players[2].hand.length, 9, 'having taken all eight, with no chance to answer');
+  assertEqual(g3.roundPoints, E.handPoints(g3.players[0].hand) + E.handPoints(g3.players[2].hand),
+    'the eight count toward the score');
+  assertEqual(g3.pendingChallenge, null);
+  assertEqual(g3.pendingDrawCount, 0);
   assertValid(g3);
-
-  var accepted = E.applyDraw(g3, seededRng(9));
-  assertEqual(accepted.phase, 'roundOver');
-  assertEqual(accepted.roundWinner, 1, 'the player who emptied their hand wins it');
-  assertEqual(accepted.players[2].hand.length, 9, 'having eaten all eight');
-  assertValid(accepted);
-
-  var failed = E.applyChallenge(g3, seededRng(9));
-  assertEqual(failed.phase, 'roundOver');
-  assertEqual(failed.roundWinner, 1);
-  assertEqual(failed.players[2].hand.length, 11, 'the eight plus two');
-  assertValid(failed);
 });
 
 test('seeded playouts with the challenge rule on stay valid at every step', function () {

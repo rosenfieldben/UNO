@@ -276,6 +276,20 @@ body {
 
 #direction-indicator { font-size: 30px; line-height: 1; }
 
+/* The total the player on turn must answer or take. */
+#pending-total {
+  min-width: 40px;
+  padding: 4px 8px;
+  border-radius: 14px;
+  background: var(--red);
+  color: white;
+  border: 2px solid white;
+  font-weight: bold;
+  font-size: 18px;
+  text-align: center;
+  box-shadow: 0 0 10px rgba(0,0,0,.4);
+}
+
 /* ----- message bar ----- */
 
 #message-bar {
