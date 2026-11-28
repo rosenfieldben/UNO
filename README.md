@@ -139,7 +139,9 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   points of round wins and 4 to 6 card points. Every one of those
   ranges excludes zero, at two, three and four players. Against a hand
   of three or more a CPU Wild Draw Four is never a bluff, so accepting
-  is right. With stacking on, accepting stays right in the
+  is right. Your hand counts as it stood when the card was played: if
+  you missed your own Uno call, the Wild Draw Four itself deals your
+  two-card penalty, and the CPU chose it seeing your one card. With stacking on, accepting stays right in the
   same cases, but challenging a CPU left with five or more is no longer
   a clear gain in round wins (+1.4, +0.5 and 0.0 points at two, three
   and four players, none clear of zero). In card points it still pays

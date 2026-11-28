@@ -971,7 +971,8 @@ test('a penalty landing on someone else in the same move leaves the held cards c
    * Player 0 still held a red when they chose the play: guilty, on that
    * card alone.
    */
-  var hand0 = [card('red', '3'), card(null, 'wild4'), card('red', '9')].concat(FILLER[0].slice(0, 4));
+  /* The red sits last, where a penalty counted off the end would hide it. */
+  var hand0 = [card('red', '3'), card(null, 'wild4')].concat(FILLER[0].slice(0, 4), [card('red', '9')]);
   var hand1 = [card('red', '4')].concat(FILLER[1].slice(0, 6));
   var hand2 = [card('red', '6'), card('yellow', '9')].concat(FILLER[2].slice(0, 5));
   var g = makeGame([hand0, hand1, hand2], card('red', '5'), { challengeRule: true });
