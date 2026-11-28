@@ -247,11 +247,12 @@
    *
    * priorColor is the color that was active when the card was played,
    * which is the only thing the challenge rule judges a Wild Draw Four
-   * against. Only applyPlay can reach that case with the flag on, so
-   * startRound's virtual-dealer call has none to supply: a Wild Draw Four
-   * can never be the first flip.
+   * against, and held is the hand its player chose it from (see
+   * applyPlay). Only applyPlay can reach that case with the flag on, so
+   * startRound's virtual-dealer call has neither to supply: a Wild Draw
+   * Four can never be the first flip.
    */
-  function applyCardEffect(state, card, rng, priorColor) {
+  function applyCardEffect(state, card, rng, priorColor, held) {
     switch (card.value) {
       case 'skip':
         advance(state, 2);
@@ -285,7 +286,7 @@
          * nothing but cards of its own value.
          */
         if (state.config.challengeRule && state.pendingDrawCount === 0) {
-          openChallenge(state, priorColor);
+          openChallenge(state, priorColor, held);
         } else {
           forceDraw(state, 4, 'wild4', rng);
         }
@@ -320,21 +321,21 @@
    * Guilt is frozen here, at the moment of play, and is never recomputed
    * later. By the time the victim decides, the offender's hand may have
    * changed (a lazy Uno penalty landing, or an earlier challenge handing
-   * cards back), and the rule judges the hand as it was when the card
-   * hit the table.
+   * cards back), and the rule judges held: the hand the offender chose
+   * the card from, as applyPlay passes it.
    */
-  function openChallenge(state, priorColor) {
+  function openChallenge(state, priorColor, held) {
     var offender = state.currentPlayer;
     var matches = 0;
     /*
-     * The played card is already out of the hand, so it cannot count
-     * against its own player. The null guard is not cosmetic: wilds
-     * carry a null color, so without it a round that opened on a flipped
-     * Wild (no active color, and therefore nothing to dodge) would count
-     * every wild in hand as a match.
+     * held leaves out the played card, so it cannot count against its own
+     * player. The null guard is not cosmetic: wilds carry a null color,
+     * so without it a round that opened on a flipped Wild (no active
+     * color, and therefore nothing to dodge) would count every wild in
+     * hand as a match.
      */
     if (priorColor !== null) {
-      state.players[offender].hand.forEach(function (c) {
+      held.forEach(function (c) {
         if (c.color === priorColor) matches += 1;
       });
     }
@@ -654,10 +655,29 @@
 
     /*
      * state is the untouched input, so state.currentColor is still the
-     * color this card had to beat: exactly what the challenge rule
-     * judges a Wild Draw Four against.
+     * color this card had to beat, and its hand is the one the player
+     * chose this card from: what the challenge rule judges a Wild Draw
+     * Four on. The hand in next is not. A two-player Skip or Reverse can
+     * hand the turn back to a player who forgot Uno, and the penalty this
+     * move dealt them first is cards they did not hold when they chose
+     * the play, so it must not make them guilty.
      */
-    applyCardEffect(next, played, rng, state.currentColor);
+    var hand = state.players[action.playerIndex].hand;
+    var held = hand.filter(function (c, i) { return i !== action.cardIndex; });
+    /*
+     * The same goes for a card drawn this turn and then played, when the
+     * draw itself enforced the player's own penalty. Those penalty cards
+     * arrived with the card, and after a draw only the drawn card may be
+     * played, so the hand to judge is the one from before the draw. The
+     * input is the state the draw produced, so state.unoPenalty still
+     * reports that draw's penalty, and its cards sit just before the
+     * drawn card: enforceUnoPenalty runs first and every draw is pushed
+     * onto the end of the hand.
+     */
+    if (state.pendingDraw && state.unoPenalty && state.unoPenalty.player === action.playerIndex) {
+      held = hand.slice(0, action.cardIndex - state.unoPenalty.drew);
+    }
+    applyCardEffect(next, played, rng, state.currentColor, held);
 
     /*
      * The win check happens after the card effect on purpose: a final

@@ -218,15 +218,36 @@ test('challenge calls and verdicts read from the engine record', function () {
   assertEqual(N.challengeCall(0), 'You challenge the Wild Draw Four.');
   assertEqual(N.challengeCall(2), 'CPU 2 challenges the Wild Draw Four!');
   var failed = E.applyChallenge(wild4AtHuman(), seededRng(9));
-  assertEqual(N.challengeNote(failed.challengeResult), 'Challenge failed: CPU 1 held no red. You draw 6.');
+  assertEqual(N.challengeNote(failed.challengeResult), 'Challenge failed: CPU 1 had no red to play. You draw 6.');
   var hand1 = [card(null, 'wild4'), card('red', '8')].concat(FILLER[1].slice(0, 5));
   var g = makeGame([[card('red', '3')].concat(FILLER[0].slice(0, 6)), hand1], card('red', '5'), { challengeRule: true });
   var upheld = E.applyChallenge(play(play(g, 0, 0), 1, 0, 'green'), seededRng(9));
-  assertEqual(N.challengeNote(upheld.challengeResult), 'Challenge upheld: CPU 1 held 1 red card and draws 4.');
+  assertEqual(N.challengeNote(upheld.challengeResult), 'Challenge upheld: CPU 1 held 1 red card it could have played, and draws 4.');
   assertEqual(N.challengeNote({ challenger: 1, offender: 0, guilty: false, color: null, colorMatches: 0, drew: 6 }),
     'Challenge failed: there was no color in play to match. CPU 1 draws 6.');
   assertEqual(N.challengeNote({ challenger: 1, offender: 0, guilty: true, color: 'blue', colorMatches: 2, drew: 4 }),
-    'Challenge upheld: You held 2 blue cards and draw 4.');
+    'Challenge upheld: You held 2 blue cards you could have played, and draw 4.');
+});
+
+test('a failed challenge never says the offender held no red while penalty reds sit in their hand', function () {
+  /*
+   * The human's red Skip hands them the turn back with an uncalled Uno.
+   * Their draw deals the two-card penalty, two reds, then a Wild Draw
+   * Four, which they play. Those reds are in their hand, but they could
+   * not have been played instead, so the challenge fails, and the words
+   * must not deny the reds.
+   */
+  var hand0 = [card('red', 'skip'), card('green', '9')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { challengeRule: true });
+  U.trimHand(g, 0, 2);
+  var g2 = play(g, 0, 0, undefined, false);
+  toTop(toTop(toTop(g2, card(null, 'wild4')), card('red', '8')), card('red', '7'));
+  var drew = E.applyDraw(g2, seededRng(9));
+  var g3 = play(drew, 0, drew.pendingDraw.cardIndex, 'blue');
+  var after = E.applyChallenge(g3, seededRng(9));
+  assertEqual(after.players[0].hand.filter(function (c) { return c.color === 'red'; }).length, 2,
+    'precondition: the penalty reds are in the human\'s hand');
+  assertEqual(N.challengeNote(after.challengeResult), 'Challenge failed: You had no red to play. CPU 1 draws 6.');
 });
 
 test('an Uno penalty names who missed and how many they drew', function () {
@@ -245,7 +266,7 @@ test('a message joins the move, the verdict, and what the human owes next', func
   assertEqual(N.message(g3, N.playNote(g2, action)), 'CPU 1 plays wild +4, choosing green. Challenge the Wild Draw Four, or take 4?');
   var g4 = E.applyChallenge(g3, seededRng(9));
   assertEqual(N.message(g4, N.challengeCall(0)),
-    'You challenge the Wild Draw Four. Challenge failed: CPU 1 held no red. You draw 6.');
+    'You challenge the Wild Draw Four. Challenge failed: CPU 1 had no red to play. You draw 6.');
   assertEqual(N.message(makeGame([FILLER[0], FILLER[1]], card('red', '5')), ''), '');
 });
 

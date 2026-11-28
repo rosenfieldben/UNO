@@ -85,6 +85,12 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   challenge costs the challenger six (the four plus two) and their turn.
   Guilt is decided at the moment of play and never revisited, so cards
   moving in or out of a hand while the window is open change nothing.
+  It is judged on the hand the offender chose the card from. The two
+  cards of a missed-Uno penalty do not count when they were dealt in the
+  same move, or in the draw that produced the card, since they arrived
+  after the choice or could not have been played instead. A penalty
+  dealt by an earlier move does count: those cards were in hand when
+  the play was chosen.
 - A Wild Draw Four played as a last card does not end the round until
   that window resolves: accepting or challenging and losing lets the win
   stand, with the drawn cards counted in the score, while a successful
@@ -132,8 +138,10 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   wins and 11 to 18% in points, and challenging every one gains about 2
   points of round wins and 4 to 6 card points. Every one of those
   ranges excludes zero, at two, three and four players. Against a hand
-  of three or more a CPU Wild Draw Four is never a chosen bluff, so
-  accepting is right. With stacking on, accepting stays right in the
+  of three or more a CPU Wild Draw Four is never a bluff, so accepting
+  is right. Your hand counts as it stood when the card was played: if
+  you missed your own Uno call, the Wild Draw Four itself deals your
+  two-card penalty, and the CPU chose it seeing your one card. With stacking on, accepting stays right in the
   same cases, but challenging a CPU left with five or more is no longer
   a clear gain in round wins (+1.4, +0.5 and 0.0 points at two, three
   and four players, none clear of zero). In card points it still pays
@@ -145,10 +153,8 @@ again on `main` before each deploy (`.github/workflows/pages.yml`).
   Four from a CPU left with one or two cards is a bluff about 3% of the
   time, against about a quarter of the time from one holding five or
   more (25 to 28%), since a big hand is likely to still hold the color
-  in play. A chosen bluff never re-declares the color already in play,
-  so that gives nothing away. The rare guilty play that does, about 1%
-  of them in a two-player game, is a CPU whose own missed-Uno penalty,
-  dealt in the same move, handed it the color.
+  in play. A bluffing CPU never re-declares the color already in play,
+  so that gives nothing away.
 - Reverse acts as Skip in a two-player game.
 - Failing to call Uno before the next action costs two cards; in a
   two-player game an action card that hands you the turn straight back

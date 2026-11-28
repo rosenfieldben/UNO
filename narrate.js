@@ -136,19 +136,25 @@
   /*
    * A successful challenge is an accusation, so the message carries the
    * evidence with it: how many cards of the color in play the offender
-   * was holding when the wild went down. That count comes from the
-   * engine's snapshot, which is the only honest source for it.
+   * could have played instead. That count comes from the engine's
+   * snapshot, which is the only honest source for it, and it is not
+   * every card of that color in hand. Cards of a missed-Uno penalty dealt
+   * with the play, or in the draw that produced it, are left out (see
+   * applyPlay in engine.js), so "held no red" could contradict a hand
+   * showing two penalty reds. The words say what the rule judges: what
+   * there was to play.
    */
   function challengeNote(result) {
     var offender = playerName(result.offender);
     if (result.guilty) {
       return 'Challenge upheld: ' + offender + ' held ' + result.colorMatches + ' ' +
-        result.color + ' card' + (result.colorMatches === 1 ? '' : 's') + ' and ' +
+        result.color + ' card' + (result.colorMatches === 1 ? '' : 's') + ' ' +
+        (result.offender === 0 ? 'you' : 'it') + ' could have played, and ' +
         verb(result.offender, 'draw') + ' ' + result.drew + '.';
     }
     var basis = result.color === null
       ? 'there was no color in play to match'
-      : offender + ' held no ' + result.color;
+      : offender + ' had no ' + result.color + ' to play';
     return 'Challenge failed: ' + basis + '. ' + playerName(result.challenger) + ' ' +
       verb(result.challenger, 'draw') + ' ' + result.drew + '.';
   }

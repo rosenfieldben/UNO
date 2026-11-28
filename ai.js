@@ -215,11 +215,10 @@
        * always did. Answering a stack it cannot be a bluff, since an
        * answer is never judged on color (see applyCardEffect in
        * engine.js). On an ordinary turn it is the only legal card only
-       * when no card of the color in play is held as the CPU decides, but
-       * the engine judges the hand as the card lands: in a two-player
-       * game a Skip or Reverse can hand the turn back to a CPU that forgot
-       * Uno, and the penalty cards dealt in the same move may hold the
-       * color. Declining is always safe, since it only happens when
+       * when no card of the color in play is held, which makes it honest:
+       * the engine judges the hand the card was chosen from, so the cards
+       * of a missed-Uno penalty dealt in the same move do not count (see
+       * applyPlay). Declining is always safe, since it only happens when
        * another legal play exists.
        */
       if (wild4) {

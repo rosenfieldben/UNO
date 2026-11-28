@@ -830,6 +830,164 @@ test('the Uno window survives a challenge window, lazily and through catchUno', 
   assertValid(accepted);
 });
 
+/* Moves a draw-pile card to the top, so the next card dealt is that one. */
+function toTop(state, spec) {
+  for (var i = 0; i < state.drawPile.length; i++) {
+    if (sameCard(state.drawPile[i], spec)) {
+      state.drawPile.push(state.drawPile.splice(i, 1)[0]);
+      return state;
+    }
+  }
+  throw new Error('toTop: card not in draw pile');
+}
+
+test('cards an Uno penalty deals in the same move never make a Wild Draw Four guilty', function () {
+  /*
+   * Two players. Player 0's red Skip leaves them one card, the Wild Draw
+   * Four, without an Uno call, and hands them the turn straight back.
+   * Playing it is the action that enforces the penalty, which deals them
+   * two reds first. They held no red when they chose the play, so the
+   * play is honest and a challenge fails.
+   */
+  var hand0 = [card('red', 'skip'), card(null, 'wild4')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { challengeRule: true });
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, declareUno: false }, seededRng(9));
+  assertEqual(g2.currentPlayer, 0, 'precondition: the Skip handed the turn back');
+  assertEqual(g2.unoPending, 0, 'precondition: the Uno call was missed');
+  toTop(toTop(g2, card('red', '7')), card('red', '8'));
+  var g3 = E.applyPlay(g2, { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'green' }, seededRng(9));
+  assertEqual(g3.unoPenalty.player, 0);
+  assertEqual(g3.unoPenalty.drew, 2);
+  assertEqual(g3.players[0].hand.filter(function (c) { return c.color === 'red'; }).length, 2,
+    'the penalty did deal two reds before the card landed');
+  assertEqual(g3.pendingChallenge.color, 'red');
+  assertEqual(g3.pendingChallenge.colorMatches, 0, 'judged on the hand the card was chosen from');
+  assertEqual(g3.pendingChallenge.hadColorMatch, false);
+  assertValid(g3);
+  var failed = E.applyChallenge(g3, seededRng(9));
+  assertEqual(failed.challengeResult.guilty, false);
+  assertEqual(failed.players[1].hand.length, 13, 'the challenger draws the four plus two');
+  assertValid(failed);
+});
+
+test('nor do penalty cards from the draw that produced a Wild Draw Four played at once', function () {
+  /*
+   * Two players. Player 0's red Skip leaves them a green 9 they cannot
+   * play, without an Uno call, and hands them the turn back. Their draw
+   * enforces the penalty, two reds, and then deals a Wild Draw Four,
+   * the only card they may play after drawing. Judged on the hand from
+   * before that draw, it is honest.
+   */
+  var hand0 = [card('red', 'skip'), card('green', '9')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { challengeRule: true });
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, declareUno: false }, seededRng(9));
+  assertEqual(E.legalPlays(g2, 0).length, 0, 'precondition: nothing to play, so a draw');
+  toTop(toTop(toTop(g2, card(null, 'wild4')), card('red', '8')), card('red', '7'));
+  var drew = E.applyDraw(g2, seededRng(9));
+  assertEqual(drew.unoPenalty.player, 0);
+  assertEqual(drew.unoPenalty.drew, 2);
+  assertEqual(drew.players[0].hand[drew.pendingDraw.cardIndex].value, 'wild4', 'precondition: it drew the Wild Draw Four');
+  var g3 = E.applyPlay(drew, { type: 'play', playerIndex: 0, cardIndex: drew.pendingDraw.cardIndex, chosenColor: 'blue' },
+    seededRng(9));
+  assertEqual(g3.pendingChallenge.color, 'red');
+  assertEqual(g3.pendingChallenge.colorMatches, 0, 'the two reds came with the draw');
+  assertEqual(g3.pendingChallenge.hadColorMatch, false);
+  assertValid(g3);
+});
+
+test('only the penalty cards are left out: a color held before that draw still counts', function () {
+  /*
+   * As above, but the card player 0 is left with is a red they could
+   * have played. They draw anyway, the penalty deals two more reds, and
+   * they play the Wild Draw Four that follows. The red they held when
+   * they chose to draw makes it a bluff; the two from the penalty do not
+   * add to the count.
+   */
+  var hand0 = [card('red', 'skip'), card('red', '9')].concat(FILLER[0].slice(0, 5));
+  var g = makeGame([hand0, FILLER[1]], card('red', '5'), { challengeRule: true });
+  trimHand(g, 0, 2);
+  var g2 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, declareUno: false }, seededRng(9));
+  toTop(toTop(toTop(g2, card(null, 'wild4')), card('red', '8')), card('red', '7'));
+  var drew = E.applyDraw(g2, seededRng(9));
+  assertEqual(drew.unoPenalty.drew, 2, 'precondition: the draw enforced the penalty');
+  var g3 = E.applyPlay(drew, { type: 'play', playerIndex: 0, cardIndex: drew.pendingDraw.cardIndex, chosenColor: 'blue' },
+    seededRng(9));
+  assertEqual(g3.pendingChallenge.colorMatches, 1, 'the red 9 alone');
+  assertEqual(g3.pendingChallenge.hadColorMatch, true);
+  assertValid(g3);
+});
+
+test('a penalty a draw deals to someone else leaves the drawer\'s own cards counting', function () {
+  /*
+   * Two players. Player 1 misses their Uno call; player 0's draw is the
+   * next action, so it enforces player 1's penalty. Player 0 keeps both
+   * reds they held, drawn Wild Draw Four or not.
+   */
+  var hand0 = [card('red', '3')].concat(FILLER[0].slice(0, 4), [card('red', '7'), card('red', '8')]);
+  var hand1 = [card('red', '4'), card('blue', '9')].concat(FILLER[1].slice(0, 5));
+  var g = makeGame([hand0, hand1], card('red', '5'), { challengeRule: true });
+  trimHand(g, 1, 2);
+  var s1 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  var s2 = E.applyPlay(s1, { type: 'play', playerIndex: 1, cardIndex: 0, declareUno: false }, seededRng(9));
+  assertEqual(s2.unoPending, 1, 'precondition: player 1 missed the call');
+  /* The penalty is dealt first, so two cards go above the Wild Draw Four. */
+  toTop(toTop(toTop(s2, card(null, 'wild4')), card('yellow', '5')), card('yellow', '6'));
+  var drew = E.applyDraw(s2, seededRng(9));
+  assertEqual(drew.unoPenalty.player, 1, 'the draw enforced player 1\'s penalty');
+  var g3 = E.applyPlay(drew, { type: 'play', playerIndex: 0, cardIndex: drew.pendingDraw.cardIndex, chosenColor: 'blue' },
+    seededRng(9));
+  assertEqual(g3.pendingChallenge.colorMatches, 2, 'both reds player 0 held');
+  assertValid(g3);
+});
+
+test('penalty cards dealt by an earlier move do count: they were held when the play was chosen', function () {
+  /*
+   * Two players. Player 0 plays a red 3 down to their Wild Draw Four
+   * without calling Uno, and player 1's next play enforces the penalty:
+   * two reds. Only then does player 0 choose to play the Wild Draw Four,
+   * holding those reds, so it is a bluff.
+   */
+  var hand0 = [card('red', '3'), card(null, 'wild4')].concat(FILLER[0].slice(0, 5));
+  var hand1 = [card('red', '4')].concat(FILLER[1].slice(0, 6));
+  var g = makeGame([hand0, hand1], card('red', '5'), { challengeRule: true });
+  trimHand(g, 0, 2);
+  var s1 = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0, declareUno: false }, seededRng(9));
+  toTop(toTop(s1, card('red', '8')), card('red', '7'));
+  var s2 = E.applyPlay(s1, { type: 'play', playerIndex: 1, cardIndex: 0 }, seededRng(9));
+  assertEqual(s2.unoPenalty.player, 0, 'precondition: player 1\'s play dealt player 0 the penalty');
+  assertEqual(s2.currentPlayer, 0);
+  var g3 = E.applyPlay(s2, { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'blue' }, seededRng(9));
+  assertEqual(g3.pendingChallenge.colorMatches, 2);
+  assertEqual(g3.pendingChallenge.hadColorMatch, true);
+  assertValid(g3);
+});
+
+test('a penalty landing on someone else in the same move leaves the held cards counting', function () {
+  /*
+   * Three players. Player 2 misses their Uno call, and player 0's Wild
+   * Draw Four is the next action, so it enforces player 2's penalty.
+   * Player 0 still held a red when they chose the play: guilty, on that
+   * card alone.
+   */
+  /* The red sits last, where a penalty counted off the end would hide it. */
+  var hand0 = [card('red', '3'), card(null, 'wild4')].concat(FILLER[0].slice(0, 4), [card('red', '9')]);
+  var hand1 = [card('red', '4')].concat(FILLER[1].slice(0, 6));
+  var hand2 = [card('red', '6'), card('yellow', '9')].concat(FILLER[2].slice(0, 5));
+  var g = makeGame([hand0, hand1, hand2], card('red', '5'), { challengeRule: true });
+  trimHand(g, 2, 2);
+  var s = E.applyPlay(g, { type: 'play', playerIndex: 0, cardIndex: 0 }, seededRng(9));
+  s = E.applyPlay(s, { type: 'play', playerIndex: 1, cardIndex: 0 }, seededRng(9));
+  s = E.applyPlay(s, { type: 'play', playerIndex: 2, cardIndex: 0, declareUno: false }, seededRng(9));
+  assertEqual(s.unoPending, 2, 'precondition: player 2 missed the call');
+  var g2 = E.applyPlay(s, { type: 'play', playerIndex: 0, cardIndex: 0, chosenColor: 'blue' }, seededRng(9));
+  assertEqual(g2.unoPenalty.player, 2, 'the penalty fell on player 2');
+  assertEqual(g2.pendingChallenge.colorMatches, 1, 'only the red player 0 held counts');
+  assertEqual(g2.pendingChallenge.hadColorMatch, true);
+  assertValid(g2);
+});
+
 test('a challenge window freezes ordinary play until it is answered', function () {
   var hand0 = [card(null, 'wild4')].concat(FILLER[0].slice(0, 6));
   var hand1 = [card('green', '9')].concat(FILLER[1].slice(0, 6));
